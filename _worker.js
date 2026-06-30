@@ -910,18 +910,32 @@ async function handleDashboardApi(request, env, ctx) {
     sevenDaysAgo.setUTCHours(0,0,0,0);
     const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
 
+    // Query today's data separately from UTC midnight to avoid hitting the 1000-record
+    // GraphQL limit when 7-day data is large, which would truncate today's records.
+    const todayUTC = new Date();
+    todayUTC.setUTCHours(0,0,0,0);
+    const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
+
     const promises = accounts.map(async (account) => {
       try {
-        const groups = await queryGraphQL(account.accountId, account.apiToken, startSevenDays);
-        const parsed = processAnalytics(groups);
+        // Run both queries in parallel: today-only for accurate current usage,
+        // and 7-day range for historical chart data.
+        const [todayGroups, historyGroups] = await Promise.all([
+          queryGraphQL(account.accountId, account.apiToken, startToday),
+          queryGraphQL(account.accountId, account.apiToken, startSevenDays)
+        ]);
+        // Use today-only query for usageToday and modelsToday (accurate, no truncation)
+        const todayParsed = processAnalytics(todayGroups);
+        // Use 7-day query only for history
+        const historyParsed = processAnalytics(historyGroups);
         return {
           id: account.id,
           name: account.name,
           accountId: account.accountId,
           status: 'active',
-          usageToday: parsed.todayTotalNeurons,
-          modelsToday: parsed.todayModels,
-          history: parsed.history
+          usageToday: todayParsed.todayTotalNeurons,
+          modelsToday: todayParsed.todayModels,
+          history: historyParsed.history
         };
       } catch (e) {
         console.error(`Detailed usage fetch error for ${account.name}:`, e);
