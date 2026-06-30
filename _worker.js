@@ -10,7 +10,7 @@ const DEFAULT_MODEL_MAP = {
   'glm-5.2': '@cf/zai-org/glm-5.2',
   'glm-4.7-flash': '@cf/zai-org/glm-4.7-flash',
   'kimi-k2.7-code': '@cf/moonshotai/kimi-k2.7-code',
-  'kimi-k2.6': '@cf/moonshotai/kimi-k2.6',
+  //'kimi-k2.6': '@cf/moonshotai/kimi-k2.6', // 就是一坨屎，别吃
   'gemma-4-26b-a4b-it': '@cf/google/gemma-4-26b-a4b-it',
   'nemotron-3-120b-a12b': '@cf/nvidia/nemotron-3-120b-a12b',
   'gpt-oss-20b': '@cf/openai/gpt-oss-20b',
