@@ -429,7 +429,7 @@ async function handleCompletions(request, env, pathname) {
     return new Response(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }), { status: 400 });
   }
 
-  const { model, messages, prompt, stream, temperature, max_tokens } = body;
+  const { model, messages, prompt, stream } = body;
   
   if (pathname === '/v1/chat/completions' && !messages) {
     return new Response(JSON.stringify({ error: { message: "messages field is required", type: "invalid_request_error" } }), { status: 400 });
@@ -449,17 +449,26 @@ async function handleCompletions(request, env, pathname) {
     }
   }
 
-  // Format request body for Cloudflare AI
-  let cfPayload = {};
-  if (pathname === '/v1/chat/completions') {
-    cfPayload.messages = messages;
-  } else {
-    // For legacy text completions, map prompt to a user message
-    cfPayload.messages = [{ role: 'user', content: prompt }];
+  // Build payload for /ai/v1/chat/completions (CF's OpenAI-compatible endpoint)
+  const cfPayload = {
+    model: cfModel,
+    messages: pathname === '/v1/chat/completions' ? messages : [{ role: 'user', content: prompt }],
+    stream: !!stream,
+  };
+
+  // Passthrough all standard OpenAI optional fields — including tool calling fields
+  const passthroughFields = [
+    'temperature', 'max_tokens', 'top_p', 'n',
+    'stop', 'presence_penalty', 'frequency_penalty',
+    'logprobs', 'top_logprobs', 'seed', 'user',
+    // Tool calling — critical for Cherry Studio / MCP clients
+    'tools', 'tool_choice', 'parallel_tool_calls',
+    // Structured output
+    'response_format',
+  ];
+  for (const field of passthroughFields) {
+    if (body[field] !== undefined) cfPayload[field] = body[field];
   }
-  cfPayload.stream = !!stream;
-  if (temperature !== undefined) cfPayload.temperature = temperature;
-  if (max_tokens !== undefined) cfPayload.max_tokens = max_tokens;
 
   // Retrieve accounts
   const accounts = await getAccounts(env);
@@ -472,74 +481,45 @@ async function handleCompletions(request, env, pathname) {
 
   // Randomize accounts list for load balancing
   const shuffledAccounts = [...activeAccounts].sort(() => Math.random() - 0.5);
-  
   let lastError = null;
 
-  // Try each account until one succeeds
   for (const account of shuffledAccounts) {
     try {
-      const cfResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/run/${cfModel}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${account.apiToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(cfPayload)
-      });
+      // Switch to /ai/v1/chat/completions — CF's OpenAI-compatible endpoint
+      // This endpoint natively supports tools/tool_choice and returns standard OpenAI JSON
+      const cfResponse = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/v1/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${account.apiToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(cfPayload),
+        }
+      );
 
       if (cfResponse.ok) {
         if (stream) {
-          const transformedStream = createOpenAILikeStream(cfResponse.body, model);
+          // Streaming: passthrough CF's SSE directly, only normalise the model name
+          const transformedStream = passthroughStream(cfResponse.body, model);
           return new Response(transformedStream, {
             headers: {
               'Content-Type': 'text/event-stream',
               'Cache-Control': 'no-cache',
               'Connection': 'keep-alive',
-              'Transfer-Encoding': 'chunked'
-            }
+              'Transfer-Encoding': 'chunked',
+            },
           });
         } else {
+          // Non-streaming: CF already returns standard OpenAI JSON
+          // Passthrough directly — this preserves tool_calls, finish_reason, usage, etc.
           const cfJson = await cfResponse.json();
-          if (cfJson.success) {
-            let answer = '';
-            let reasoning = '';
-            if (cfJson.result) {
-              if (cfJson.result.response !== undefined) {
-                answer = cfJson.result.response;
-              } else if (cfJson.result.choices && cfJson.result.choices[0]) {
-                const msg = cfJson.result.choices[0].message;
-                if (msg) {
-                  answer = msg.content || '';
-                  reasoning = msg.reasoning_content || msg.reasoning || '';
-                } else if (cfJson.result.choices[0].text !== undefined) {
-                  answer = cfJson.result.choices[0].text;
-                }
-              }
-            }
-
-            const completion = {
-              id: `chatcmpl-${crypto.randomUUID()}`,
-              object: pathname === '/v1/chat/completions' ? "chat.completion" : "text_completion",
-              created: Math.floor(Date.now() / 1000),
-              model: model,
-              choices: [
-                {
-                  index: 0,
-                  message: pathname === '/v1/chat/completions' ? { 
-                    role: "assistant", 
-                    content: answer,
-                    ...(reasoning ? { reasoning_content: reasoning } : {})
-                  } : undefined,
-                  text: pathname === '/v1/completions' ? answer : undefined,
-                  finish_reason: "stop"
-                }
-              ],
-              usage: estimateUsage(cfPayload.messages, answer)
-            };
-            return new Response(JSON.stringify(completion), { headers: { 'Content-Type': 'application/json' } });
-          } else {
-            lastError = `CF Run failed: ${JSON.stringify(cfJson.errors)}`;
-          }
+          // Only override the model name so the client sees the alias they requested
+          if (cfJson.model !== undefined) cfJson.model = model;
+          return new Response(JSON.stringify(cfJson), {
+            headers: { 'Content-Type': 'application/json' },
+          });
         }
       } else {
         const errorText = await cfResponse.text();
@@ -659,22 +639,23 @@ function estimateUsage(messages, answer) {
   };
 }
 
-// Create OpenAI-compatible streaming response
-function createOpenAILikeStream(upstreamBody, modelName) {
+// Passthrough SSE stream from CF /ai/v1/chat/completions
+// CF's response is already in standard OpenAI SSE format — we only normalise the model name
+// so that tool_calls, finish_reason, reasoning_content, usage etc. are all preserved intact.
+function passthroughStream(upstreamBody, modelName) {
   const reader = upstreamBody.getReader();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = '';
-  const streamId = `chatcmpl-${crypto.randomUUID()}`;
-  const created = Math.floor(Date.now() / 1000);
 
   return new ReadableStream({
     async pull(controller) {
       while (true) {
         const { value, done } = await reader.read();
         if (done) {
-          if (buffer) {
-            processLines(buffer, controller);
+          // Flush remaining buffer
+          if (buffer.trim()) {
+            buffer = processLines(buffer, controller);
           }
           controller.enqueue(encoder.encode('data: [DONE]\n\n'));
           controller.close();
@@ -683,7 +664,7 @@ function createOpenAILikeStream(upstreamBody, modelName) {
 
         buffer += decoder.decode(value, { stream: true });
         buffer = processLines(buffer, controller);
-        
+
         if (buffer.indexOf('\n') === -1) {
           break;
         }
@@ -691,53 +672,34 @@ function createOpenAILikeStream(upstreamBody, modelName) {
     },
     cancel() {
       reader.cancel();
-    }
+    },
   });
 
   function processLines(data, controller) {
     const lines = data.split('\n');
-    const remaining = lines.pop();
+    const remaining = lines.pop(); // keep incomplete last line in buffer
 
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed) continue;
+
       if (trimmed.startsWith('data: ')) {
         const dataStr = trimmed.slice(6);
-        if (dataStr === '[DONE]') {
-          continue;
-        }
-        try {
-          const parsed = JSON.parse(dataStr);
-          let content = '';
-          let reasoning = '';
-          if (parsed.response !== undefined) {
-            content = parsed.response;
-          } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
-            const delta = parsed.choices[0].delta;
-            content = delta.content || '';
-            reasoning = delta.reasoning_content || delta.reasoning || '';
-          }
+        if (dataStr === '[DONE]') continue;
 
-          const chunk = {
-            id: streamId,
-            object: "chat.completion.chunk",
-            created,
-            model: modelName,
-            choices: [
-              {
-                index: 0,
-                delta: { 
-                  content,
-                  ...(reasoning ? { reasoning_content: reasoning } : {})
-                },
-                finish_reason: null
-              }
-            ]
-          };
+        try {
+          const chunk = JSON.parse(dataStr);
+          // Only override the model name; every other field is passed through unchanged
+          // This ensures tool_calls, finish_reason, usage, reasoning_content all survive
+          if (chunk.model !== undefined) chunk.model = modelName;
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
-        } catch (e) {
-          // Ignore json parse error
+        } catch (_) {
+          // Forward unparseable lines verbatim
+          controller.enqueue(encoder.encode(`${line}\n`));
         }
+      } else {
+        // Non-data SSE lines (comments, events) — forward as-is
+        controller.enqueue(encoder.encode(`${line}\n`));
       }
     }
     return remaining;
