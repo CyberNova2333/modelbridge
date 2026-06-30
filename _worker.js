@@ -1549,6 +1549,9 @@ async function handleLandingPage(request, env, ctx) {
       }
     }
   </script>
+  <footer style="text-align: center; padding: 16px 0 20px; font-size: 12px; color: var(--text-muted); opacity: 0.6;">
+    由 <a href="https://github.com/cmliussss2024/WorkersAI2API" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">WorkersAI2API</a> 强力驱动
+  </footer>
 </body>
 </html>`;
 
@@ -2116,15 +2119,6 @@ function handleAdminPage(request, env, ctx) {
       <span class="logo-text">Workers AI to API</span>
     </div>
     <div style="display: flex; align-items: center; gap: 12px;">
-      <button onclick="toggleTheme()" title="切换日间/夜间模式" style="background: none; border: none; color: var(--text-main); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; outline: none;">
-        <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
-          <circle cx="12" cy="12" r="4" />
-          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-        </svg>
-        <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
-          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-        </svg>
-      </button>
       <button class="mobile-nav-toggle" onclick="toggleSidebar()">
         <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
         <span>菜单</span>
@@ -2171,6 +2165,9 @@ function handleAdminPage(request, env, ctx) {
           <span>切换主题</span>
         </button>
         <button class="btn btn-secondary" onclick="logout()">退出登录</button>
+        <div style="text-align: center; font-size: 11px; color: var(--text-muted); opacity: 0.55; padding-top: 4px;">
+          由 <a href="https://github.com/cmliussss2024/WorkersAI2API" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">WorkersAI2API</a> 强力驱动
+        </div>
       </div>
     </aside>
 
@@ -2251,7 +2248,7 @@ function handleAdminPage(request, env, ctx) {
               <div class="section-title">账号用量明细</div>
               <button class="btn btn-secondary" onclick="loadUsageDetails()">刷新用量</button>
             </div>
-            <div id="accounts-usage-list" style="display: flex; flex-direction: column; gap: 16px;">
+            <div id="accounts-usage-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
               <!-- Individual account progress item -->
             </div>
           </div>
