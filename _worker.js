@@ -1,0 +1,3232 @@
+/**
+ * WorkersAI2API
+ * A reverse proxy that converts Cloudflare Workers AI to OpenAI completions format,
+ * supporting multiple account load balancing, failover retries, and a management panel.
+ */
+
+// Default model mappings
+const DEFAULT_MODEL_MAP = {
+  // Chat / Text Generation
+  'glm-5.2': '@cf/zai-org/glm-5.2',
+  'glm-4.7-flash': '@cf/zai-org/glm-4.7-flash',
+  'kimi-k2.7-code': '@cf/moonshotai/kimi-k2.7-code',
+  'kimi-k2.6': '@cf/moonshotai/kimi-k2.6',
+  'gemma-4-26b-a4b-it': '@cf/google/gemma-4-26b-a4b-it',
+  'nemotron-3-120b-a12b': '@cf/nvidia/nemotron-3-120b-a12b',
+  'gpt-oss-20b': '@cf/openai/gpt-oss-20b',
+  'gpt-oss-120b': '@cf/openai/gpt-oss-120b',
+
+  // Embeddings
+  'embeddinggemma-300m': '@cf/google/embeddinggemma-300m',
+  'qwen3-embedding-0.6b': '@cf/qwen/qwen3-embedding-0.6b',
+  'bge-m3': '@cf/baai/bge-m3'
+};
+
+export default {
+  async fetch(request, env, ctx) {
+    // 1. Check if KV is bound
+    if (!env.KV) {
+      return handleKVError(request);
+    }
+
+    // 2. Check if ADMIN_PASSWORD environment variable is configured
+    if (!env.ADMIN_PASSWORD) {
+      return handlePasswordError(request);
+    }
+
+    // Enable CORS for API requests
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+        }
+      });
+    }
+
+    const url = new URL(request.url);
+
+    // 2. API proxy endpoints (v1)
+    if (url.pathname.startsWith('/v1/')) {
+      const response = await handleV1Proxy(request, env, ctx);
+      return addCORSHeaders(response);
+    }
+
+    // 3. Admin dashboard API endpoints
+    if (url.pathname.startsWith('/api/')) {
+      const response = await handleDashboardApi(request, env, ctx);
+      return addCORSHeaders(response);
+    }
+
+    // 4. Admin Dashboard UI Page
+    if (url.pathname === '/admin' || url.pathname === '/admin/') {
+      const isLoggedIn = await verifyAdminCookie(request, env);
+      if (isLoggedIn) {
+        return handleAdminPage(request, env, ctx);
+      } else {
+        // Redirect to landing/login page
+        return new Response(null, {
+          status: 302,
+          headers: { 'Location': '/' }
+        });
+      }
+    }
+
+    // 5. Landing / Login Page
+    if (url.pathname === '/') {
+      return handleLandingPage(request, env, ctx);
+    }
+
+    // 6. Catch all redirect to root
+    return new Response('404 Not Found', { status: 404 });
+  }
+};
+
+// Helper: Add CORS headers to responses
+function addCORSHeaders(response) {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set('Access-Control-Allow-Origin', '*');
+  newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
+  newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  return newResponse;
+}
+
+// SHA-256 helper
+async function sha256(message) {
+  const msgBuffer = new TextEncoder().encode(message);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ----------------------------------------------------
+// KV Access Helpers (Combined into a single 'config' key for 1-read optimization)
+// ----------------------------------------------------
+const memoryCache = {
+  config: null,
+  configExpiry: 0
+};
+const CACHE_TTL_MS = 60000; // 1 minute cache TTL
+
+async function getAppConfig(env) {
+  const now = Date.now();
+  if (memoryCache.config && now < memoryCache.configExpiry) {
+    return memoryCache.config;
+  }
+  
+  const raw = await env.KV.get('config');
+  let parsed = { accounts: [], apiKeys: [], customModelMap: {} };
+  
+  if (raw) {
+    try {
+      const data = JSON.parse(raw);
+      parsed = {
+        accounts: data.accounts || [],
+        apiKeys: data.apiKeys || [],
+        customModelMap: data.customModelMap || {}
+      };
+    } catch (e) {}
+  }
+  
+  memoryCache.config = parsed;
+  memoryCache.configExpiry = now + CACHE_TTL_MS;
+  return parsed;
+}
+
+async function saveAppConfig(env, config) {
+  await env.KV.put('config', JSON.stringify(config));
+  memoryCache.config = config;
+  memoryCache.configExpiry = Date.now() + CACHE_TTL_MS;
+}
+
+async function getAccounts(env) {
+  const config = await getAppConfig(env);
+  return config.accounts;
+}
+
+async function saveAccounts(env, accounts) {
+  const config = await getAppConfig(env);
+  config.accounts = accounts;
+  await saveAppConfig(env, config);
+  await env.KV.delete('cache_usage_summary'); // Clear usage summary cache
+}
+
+async function getApiKeys(env) {
+  const config = await getAppConfig(env);
+  return config.apiKeys;
+}
+
+async function saveApiKeys(env, keys) {
+  const config = await getAppConfig(env);
+  config.apiKeys = keys;
+  await saveAppConfig(env, config);
+}
+
+async function getCustomModelMap(env) {
+  const config = await getAppConfig(env);
+  return config.customModelMap;
+}
+
+async function saveCustomModelMap(env, map) {
+  const config = await getAppConfig(env);
+  config.customModelMap = map;
+  await saveAppConfig(env, config);
+}
+
+// ----------------------------------------------------
+// Admin Authentication Helper (Supports Cookie & Header)
+// ----------------------------------------------------
+async function checkAdminAuth(request, env) {
+  // 1. Try checking Cookie first (for browser calls)
+  const cookies = request.headers.get('Cookie') || '';
+  const cookieMatch = cookies.match(/admin_token=([^;]+)/);
+  let token = cookieMatch ? cookieMatch[1] : null;
+
+  // 2. Fallback to Authorization Header (for API tools)
+  if (!token) {
+    const authHeader = request.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.substring(7);
+    }
+  }
+
+  if (!token) return false;
+  
+  const expectedPassword = env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : '';
+  
+  if (!expectedPassword) return false; // Setup required
+  
+  const expectedHash = await sha256(expectedPassword);
+  return token === expectedHash;
+}
+
+// Verify Admin Cookie for page navigation
+async function verifyAdminCookie(request, env) {
+  const cookies = request.headers.get('Cookie') || '';
+  const cookieMatch = cookies.match(/admin_token=([^;]+)/);
+  if (!cookieMatch) return false;
+
+  const token = cookieMatch[1];
+
+  const expectedPassword = env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : '';
+  if (!expectedPassword) return false;
+
+  const expectedHash = await sha256(expectedPassword);
+  return token === expectedHash;
+}
+
+// ----------------------------------------------------
+// API Proxy Auth Helper
+// ----------------------------------------------------
+async function checkProxyAuth(request, env) {
+  const apiKeys = await getApiKeys(env);
+  if (apiKeys.length === 0) {
+    return true; // No keys configured = bypass auth
+  }
+
+  const authHeader = request.headers.get('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return false;
+  }
+  const token = authHeader.substring(7);
+  return apiKeys.some(k => k.key === token);
+}
+
+// ----------------------------------------------------
+// Caching Helpers for usage statistics
+// ----------------------------------------------------
+async function getCachedSummary(env) {
+  const cached = await env.KV.get('cache_usage_summary');
+  if (cached) {
+    try {
+      const data = JSON.parse(cached);
+      if (Date.now() - data.timestamp < 300000) { // 5 minutes TTL
+        return data;
+      }
+    } catch(e) {}
+  }
+  return null;
+}
+
+async function setCachedSummary(env, summaryData) {
+  const data = {
+    ...summaryData,
+    timestamp: Date.now()
+  };
+  await env.KV.put('cache_usage_summary', JSON.stringify(data));
+}
+
+// ----------------------------------------------------
+// Cloudflare GraphQL Analytics Client
+// ----------------------------------------------------
+async function queryGraphQL(accountId, apiToken, startDateTime) {
+  const query = `
+    query GetAIUsage($accountId: String!, $start: String!) {
+      viewer {
+        accounts(filter: { accountTag: $accountId }) {
+          aiInferenceAdaptiveGroups(
+            filter: { datetime_geq: $start }
+            limit: 1000
+          ) {
+            count
+            sum {
+              totalNeurons
+            }
+            dimensions {
+              date
+              modelId
+            }
+          }
+        }
+      }
+    }
+  `;
+  const response = await fetch(`https://api.cloudflare.com/client/v4/graphql`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiToken}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      query,
+      variables: {
+        accountId,
+        start: startDateTime
+      }
+    })
+  });
+  
+  if (!response.ok) {
+    throw new Error(`GraphQL API error: ${response.statusText}`);
+  }
+  
+  const result = await response.json();
+  if (result.errors && result.errors.length > 0) {
+    throw new Error(result.errors[0].message);
+  }
+  
+  return result?.data?.viewer?.accounts?.[0]?.aiInferenceAdaptiveGroups || [];
+}
+
+function processAnalytics(groups) {
+  const todayStr = new Date().toISOString().split('T')[0];
+  
+  let todayTotalNeurons = 0;
+  const todayModelsMap = {};
+  const historyMap = {};
+  
+  // Pre-fill history of the last 7 days with 0
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    const dStr = d.toISOString().split('T')[0];
+    historyMap[dStr] = 0;
+  }
+  
+  for (const group of groups) {
+    const date = group.dimensions.date;
+    const model = group.dimensions.modelId;
+    const neurons = group.sum.totalNeurons || 0;
+    const count = group.count || 0;
+    
+    if (date === todayStr) {
+      todayTotalNeurons += neurons;
+      if (!todayModelsMap[model]) {
+        todayModelsMap[model] = { model, neurons: 0, requests: 0 };
+      }
+      todayModelsMap[model].neurons += neurons;
+      todayModelsMap[model].requests += count;
+    }
+    
+    if (historyMap[date] !== undefined) {
+      historyMap[date] += neurons;
+    }
+  }
+  
+  const todayModels = Object.values(todayModelsMap).sort((a, b) => b.neurons - a.neurons);
+  const history = Object.keys(historyMap)
+    .sort()
+    .map(date => ({ date, neurons: historyMap[date] }));
+    
+  return {
+    todayTotalNeurons,
+    todayModels,
+    history
+  };
+}
+
+// ----------------------------------------------------
+// V1 API Proxy Handlers
+// ----------------------------------------------------
+async function handleV1Proxy(request, env, ctx) {
+  const url = new URL(request.url);
+  
+  // 1. Authenticate Proxy Request
+  if (!await checkProxyAuth(request, env)) {
+    return new Response(JSON.stringify({
+      error: {
+        message: "Incorrect or missing API key. Configure keys in the dashboard.",
+        type: "invalid_request_error",
+        param: null,
+        code: "invalid_api_key"
+      }
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 2. Fetch Models endpoint
+  if (url.pathname === '/v1/models' && request.method === 'GET') {
+    const customMap = await getCustomModelMap(env);
+    const combinedMap = { ...DEFAULT_MODEL_MAP, ...customMap };
+    
+    const modelsData = Object.keys(combinedMap).map(id => {
+      const isEmbedding = id.includes('embedding');
+      return {
+        id,
+        object: 'model',
+        created: 1686935000,
+        owned_by: isEmbedding ? 'openai' : 'meta'
+      };
+    });
+
+    // Also append the raw Cloudflare models in custom mapping
+    for (const rawModel of Object.values(customMap)) {
+      if (!modelsData.some(m => m.id === rawModel)) {
+        modelsData.push({
+          id: rawModel,
+          object: 'model',
+          created: 1686935000,
+          owned_by: 'cloudflare'
+        });
+      }
+    }
+
+    return new Response(JSON.stringify({
+      object: 'list',
+      data: modelsData
+    }), { headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 3. Chat completions / Completions / Embeddings
+  if ((url.pathname === '/v1/chat/completions' || url.pathname === '/v1/completions') && request.method === 'POST') {
+    return handleCompletions(request, env, url.pathname);
+  }
+
+  if (url.pathname === '/v1/embeddings' && request.method === 'POST') {
+    return handleEmbeddings(request, env);
+  }
+
+  return new Response(JSON.stringify({
+    error: { message: `Path not found: ${url.pathname}`, type: "invalid_request_error" }
+  }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+}
+
+// OpenAI completions proxy handler
+async function handleCompletions(request, env, pathname) {
+  let body;
+  try {
+    body = await request.json();
+  } catch(e) {
+    return new Response(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }), { status: 400 });
+  }
+
+  const { model, messages, prompt, stream, temperature, max_tokens } = body;
+  
+  if (pathname === '/v1/chat/completions' && !messages) {
+    return new Response(JSON.stringify({ error: { message: "messages field is required", type: "invalid_request_error" } }), { status: 400 });
+  }
+  if (pathname === '/v1/completions' && !prompt) {
+    return new Response(JSON.stringify({ error: { message: "prompt field is required", type: "invalid_request_error" } }), { status: 400 });
+  }
+
+  // Resolve model mapping
+  let cfModel = model;
+  if (!cfModel.startsWith('@cf/')) {
+    const customMap = await getCustomModelMap(env);
+    const combinedMap = { ...DEFAULT_MODEL_MAP, ...customMap };
+    cfModel = combinedMap[model];
+    if (!cfModel) {
+      cfModel = '@cf/zai-org/glm-4.7-flash'; // Default fallback
+    }
+  }
+
+  // Format request body for Cloudflare AI
+  let cfPayload = {};
+  if (pathname === '/v1/chat/completions') {
+    cfPayload.messages = messages;
+  } else {
+    // For legacy text completions, map prompt to a user message
+    cfPayload.messages = [{ role: 'user', content: prompt }];
+  }
+  cfPayload.stream = !!stream;
+  if (temperature !== undefined) cfPayload.temperature = temperature;
+  if (max_tokens !== undefined) cfPayload.max_tokens = max_tokens;
+
+  // Retrieve accounts
+  const accounts = await getAccounts(env);
+  const activeAccounts = accounts.filter(a => a.status === 'active');
+  if (activeAccounts.length === 0) {
+    return new Response(JSON.stringify({
+      error: { message: "No active Cloudflare accounts configured. Add them in the WebUI.", type: "server_error" }
+    }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // Randomize accounts list for load balancing
+  const shuffledAccounts = [...activeAccounts].sort(() => Math.random() - 0.5);
+  
+  let lastError = null;
+
+  // Try each account until one succeeds
+  for (const account of shuffledAccounts) {
+    try {
+      const cfResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/run/${cfModel}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${account.apiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(cfPayload)
+      });
+
+      if (cfResponse.ok) {
+        if (stream) {
+          const transformedStream = createOpenAILikeStream(cfResponse.body, model);
+          return new Response(transformedStream, {
+            headers: {
+              'Content-Type': 'text/event-stream',
+              'Cache-Control': 'no-cache',
+              'Connection': 'keep-alive',
+              'Transfer-Encoding': 'chunked'
+            }
+          });
+        } else {
+          const cfJson = await cfResponse.json();
+          if (cfJson.success) {
+            let answer = '';
+            let reasoning = '';
+            if (cfJson.result) {
+              if (cfJson.result.response !== undefined) {
+                answer = cfJson.result.response;
+              } else if (cfJson.result.choices && cfJson.result.choices[0]) {
+                const msg = cfJson.result.choices[0].message;
+                if (msg) {
+                  answer = msg.content || '';
+                  reasoning = msg.reasoning_content || msg.reasoning || '';
+                } else if (cfJson.result.choices[0].text !== undefined) {
+                  answer = cfJson.result.choices[0].text;
+                }
+              }
+            }
+
+            const completion = {
+              id: `chatcmpl-${crypto.randomUUID()}`,
+              object: pathname === '/v1/chat/completions' ? "chat.completion" : "text_completion",
+              created: Math.floor(Date.now() / 1000),
+              model: model,
+              choices: [
+                {
+                  index: 0,
+                  message: pathname === '/v1/chat/completions' ? { 
+                    role: "assistant", 
+                    content: answer,
+                    ...(reasoning ? { reasoning_content: reasoning } : {})
+                  } : undefined,
+                  text: pathname === '/v1/completions' ? answer : undefined,
+                  finish_reason: "stop"
+                }
+              ],
+              usage: estimateUsage(cfPayload.messages, answer)
+            };
+            return new Response(JSON.stringify(completion), { headers: { 'Content-Type': 'application/json' } });
+          } else {
+            lastError = `CF Run failed: ${JSON.stringify(cfJson.errors)}`;
+          }
+        }
+      } else {
+        const errorText = await cfResponse.text();
+        lastError = `CF API returned ${cfResponse.status}: ${errorText}`;
+      }
+    } catch (e) {
+      lastError = `Connection error: ${e.message}`;
+    }
+  }
+
+  // All accounts failed
+  return new Response(JSON.stringify({
+    error: {
+      message: `All Cloudflare accounts failed to process the request. Last error: ${lastError}`,
+      type: "server_error"
+    }
+  }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+}
+
+// OpenAI embeddings proxy handler
+async function handleEmbeddings(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch(e) {
+    return new Response(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }), { status: 400 });
+  }
+
+  const { model, input } = body;
+  if (!input) {
+    return new Response(JSON.stringify({ error: { message: "input is required", type: "invalid_request_error" } }), { status: 400 });
+  }
+
+  // Resolve model mapping
+  let cfModel = model;
+  if (!cfModel.startsWith('@cf/')) {
+    const customMap = await getCustomModelMap(env);
+    const combinedMap = { ...DEFAULT_MODEL_MAP, ...customMap };
+    cfModel = combinedMap[model];
+    if (!cfModel) {
+      cfModel = '@cf/baai/bge-m3'; // Default fallback
+    }
+  }
+
+  const textArray = Array.isArray(input) ? input : [input];
+  const accounts = await getAccounts(env);
+  const activeAccounts = accounts.filter(a => a.status === 'active');
+  if (activeAccounts.length === 0) {
+    return new Response(JSON.stringify({ error: { message: "No active accounts configured", type: "server_error" } }), { status: 503 });
+  }
+
+  const shuffledAccounts = [...activeAccounts].sort(() => Math.random() - 0.5);
+  let lastError = null;
+
+  for (const account of shuffledAccounts) {
+    try {
+      const cfResponse = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/run/${cfModel}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${account.apiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text: textArray })
+      });
+
+      if (cfResponse.ok) {
+        const cfJson = await cfResponse.json();
+        if (cfJson.success) {
+          const embeddings = cfJson.result.data.map((emb, index) => ({
+            object: "embedding",
+            index: index,
+            embedding: emb
+          }));
+
+          const responseObj = {
+            object: "list",
+            data: embeddings,
+            model: model,
+            usage: {
+              prompt_tokens: textArray.reduce((acc, text) => acc + Math.ceil(text.length / 4), 0),
+              total_tokens: textArray.reduce((acc, text) => acc + Math.ceil(text.length / 4), 0)
+            }
+          };
+          return new Response(JSON.stringify(responseObj), { headers: { 'Content-Type': 'application/json' } });
+        } else {
+          lastError = `CF Run failed: ${JSON.stringify(cfJson.errors)}`;
+        }
+      } else {
+        const errorText = await cfResponse.text();
+        lastError = `CF API status ${cfResponse.status}: ${errorText}`;
+      }
+    } catch(e) {
+      lastError = `Connection error: ${e.message}`;
+    }
+  }
+
+  return new Response(JSON.stringify({
+    error: { message: `All Cloudflare accounts failed. Last error: ${lastError}`, type: "server_error" }
+  }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+}
+
+// Token count estimator
+function estimateUsage(messages, answer) {
+  let promptChars = 0;
+  for (const msg of messages) {
+    promptChars += (msg.content || '').length;
+  }
+  const completionChars = (answer || '').length;
+  
+  const promptTokens = Math.ceil(promptChars / 4);
+  const completionTokens = Math.ceil(completionChars / 4);
+  
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: promptTokens + completionTokens
+  };
+}
+
+// Create OpenAI-compatible streaming response
+function createOpenAILikeStream(upstreamBody, modelName) {
+  const reader = upstreamBody.getReader();
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = '';
+  const streamId = `chatcmpl-${crypto.randomUUID()}`;
+  const created = Math.floor(Date.now() / 1000);
+
+  return new ReadableStream({
+    async pull(controller) {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          if (buffer) {
+            processLines(buffer, controller);
+          }
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        buffer = processLines(buffer, controller);
+        
+        if (buffer.indexOf('\n') === -1) {
+          break;
+        }
+      }
+    },
+    cancel() {
+      reader.cancel();
+    }
+  });
+
+  function processLines(data, controller) {
+    const lines = data.split('\n');
+    const remaining = lines.pop();
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith('data: ')) {
+        const dataStr = trimmed.slice(6);
+        if (dataStr === '[DONE]') {
+          continue;
+        }
+        try {
+          const parsed = JSON.parse(dataStr);
+          let content = '';
+          let reasoning = '';
+          if (parsed.response !== undefined) {
+            content = parsed.response;
+          } else if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
+            const delta = parsed.choices[0].delta;
+            content = delta.content || '';
+            reasoning = delta.reasoning_content || delta.reasoning || '';
+          }
+
+          const chunk = {
+            id: streamId,
+            object: "chat.completion.chunk",
+            created,
+            model: modelName,
+            choices: [
+              {
+                index: 0,
+                delta: { 
+                  content,
+                  ...(reasoning ? { reasoning_content: reasoning } : {})
+                },
+                finish_reason: null
+              }
+            ]
+          };
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+        } catch (e) {
+          // Ignore json parse error
+        }
+      }
+    }
+    return remaining;
+  }
+}
+
+// ----------------------------------------------------
+// Admin Dashboard API Handlers
+// ----------------------------------------------------
+async function handleDashboardApi(request, env, ctx) {
+  const url = new URL(request.url);
+  const method = request.method;
+
+  // 1. Setup Status (Always setup, password handled via env)
+  if (url.pathname === '/api/auth/status' && method === 'GET') {
+    return new Response(JSON.stringify({
+      isSetup: true
+    }), { headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 2. Setup first admin password (Disabled, handled via env)
+  if (url.pathname === '/api/auth/setup' && method === 'POST') {
+    return new Response(JSON.stringify({ error: 'Setup is handled via environment variable ADMIN_PASSWORD' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 3. Login (Direct comparison without KV read)
+  if (url.pathname === '/api/auth/login' && method === 'POST') {
+    const { password } = await request.json();
+    const expectedPassword = env.ADMIN_PASSWORD ? env.ADMIN_PASSWORD.trim() : '';
+    if (password === expectedPassword) {
+      const token = await sha256(password);
+      return new Response(JSON.stringify({ success: true }), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Set-Cookie': `admin_token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=86400`
+        }
+      });
+    } else {
+      return new Response(JSON.stringify({ error: 'Incorrect password' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // 4. Logout
+  if (url.pathname === '/api/auth/logout' && method === 'POST') {
+    return new Response(JSON.stringify({ success: true }), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': `admin_token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+      }
+    });
+  }
+
+  // 5. Public Usage Summary
+  if (url.pathname === '/api/usage/summary' && method === 'GET') {
+    const cached = await getCachedSummary(env);
+    if (cached) {
+      return new Response(JSON.stringify(cached), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const accounts = await getAccounts(env);
+    if (accounts.length === 0) {
+      return new Response(JSON.stringify({
+        totalNeuronsToday: 0,
+        totalAccounts: 0,
+        totalLimit: 0,
+        usagePercentage: 0
+      }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const today = new Date();
+    today.setUTCHours(0,0,0,0);
+    const startToday = today.toISOString().split('.')[0] + 'Z';
+
+    const promises = accounts.map(async (account) => {
+      try {
+        const groups = await queryGraphQL(account.accountId, account.apiToken, startToday);
+        let accountNeurons = 0;
+        const todayStr = new Date().toISOString().split('T')[0];
+        for (const g of groups) {
+          if (g.dimensions.date === todayStr) {
+            accountNeurons += g.sum.totalNeurons || 0;
+          }
+        }
+        return accountNeurons;
+      } catch (e) {
+        console.error(`Failed to get usage summary for ${account.name}:`, e);
+        return 0;
+      }
+    });
+
+    const results = await Promise.all(promises);
+    const totalNeuronsToday = results.reduce((a, b) => a + b, 0);
+    const totalLimit = accounts.length * 10000;
+    const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+
+    const summary = {
+      totalNeuronsToday,
+      totalAccounts: accounts.length,
+      totalLimit,
+      usagePercentage
+    };
+
+    await setCachedSummary(env, summary);
+    return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // --------------------------------------------------
+  // Authenticated Endpoints below
+  // --------------------------------------------------
+  const isAuthorized = await checkAdminAuth(request, env);
+  if (!isAuthorized) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401, headers: { 'Content-Type': 'application/json' } });
+  }
+
+    if (url.pathname === '/api/accounts') {
+      if (method === 'GET') {
+        const accounts = await getAccounts(env);
+        return new Response(JSON.stringify(accounts), { headers: { 'Content-Type': 'application/json' } });
+      }
+
+    if (method === 'POST') {
+      const { id, name, accountId, apiToken } = await request.json();
+      if (!accountId || !apiToken) {
+        return new Response(JSON.stringify({ error: 'AccountId and ApiToken are required' }), { status: 400 });
+      }
+
+      let accounts = await getAccounts(env);
+      if (id) {
+        // Update account
+        accounts = accounts.map(a => {
+          if (a.id === id) {
+            const updatedToken = (apiToken.includes('...') || apiToken === '********') ? a.apiToken : apiToken;
+            return { ...a, name: name || a.name, accountId, apiToken: updatedToken };
+          }
+          return a;
+        });
+      } else {
+        // Create account
+        accounts.push({
+          id: crypto.randomUUID(),
+          name: name || 'CF Account',
+          accountId,
+          apiToken,
+          status: 'active'
+        });
+      }
+      await saveAccounts(env, accounts);
+      return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (method === 'DELETE') {
+      const { id } = await request.json();
+      let accounts = await getAccounts(env);
+      accounts = accounts.filter(a => a.id !== id);
+      await saveAccounts(env, accounts);
+      return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // 7. Test account connectivity
+  if (url.pathname === '/api/accounts/test' && method === 'POST') {
+    const { id, accountId, apiToken } = await request.json();
+    let targetAccountId = accountId;
+    let targetApiToken = apiToken;
+
+    if (id) {
+      const accounts = await getAccounts(env);
+      const acc = accounts.find(a => a.id === id);
+      if (acc) {
+        targetAccountId = acc.accountId;
+        targetApiToken = acc.apiToken;
+      }
+    }
+
+    if (!targetAccountId || !targetApiToken) {
+      return new Response(JSON.stringify({ success: false, error: 'Account info not found' }), { status: 400 });
+    }
+
+    try {
+      const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/baai/bge-small-en-v1.5`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${targetApiToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ text: ['test'] })
+      });
+
+      if (response.ok) {
+        return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+      } else {
+        const errorText = await response.text();
+        return new Response(JSON.stringify({ success: false, error: errorText }), { headers: { 'Content-Type': 'application/json' } });
+      }
+    } catch(e) {
+      return new Response(JSON.stringify({ success: false, error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // 8. Detailed usage stats for logged-in users
+  if (url.pathname === '/api/accounts/usage' && method === 'GET') {
+    const accounts = await getAccounts(env);
+    if (accounts.length === 0) {
+      return new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    sevenDaysAgo.setUTCHours(0,0,0,0);
+    const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
+
+    const promises = accounts.map(async (account) => {
+      try {
+        const groups = await queryGraphQL(account.accountId, account.apiToken, startSevenDays);
+        const parsed = processAnalytics(groups);
+        return {
+          id: account.id,
+          name: account.name,
+          accountId: account.accountId,
+          status: 'active',
+          usageToday: parsed.todayTotalNeurons,
+          modelsToday: parsed.todayModels,
+          history: parsed.history
+        };
+      } catch (e) {
+        console.error(`Detailed usage fetch error for ${account.name}:`, e);
+        return {
+          id: account.id,
+          name: account.name,
+          accountId: account.accountId,
+          status: 'error',
+          error: e.message,
+          usageToday: 0,
+          modelsToday: [],
+          history: []
+        };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
+  }
+
+  // 9. Custom API keys for proxy authentication
+  if (url.pathname === '/api/keys') {
+    if (method === 'GET') {
+      const keys = await getApiKeys(env);
+      return new Response(JSON.stringify(keys), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (method === 'POST') {
+      const { name, key } = await request.json();
+      if (!name) {
+        return new Response(JSON.stringify({ error: 'Name is required' }), { status: 400 });
+      }
+
+      const generatedKey = key || `sk-wa-${crypto.randomUUID().replace(/-/g, '')}`;
+      const keys = await getApiKeys(env);
+      keys.push({
+        id: crypto.randomUUID(),
+        name,
+        key: generatedKey,
+        createdAt: new Date().toISOString()
+      });
+      await saveApiKeys(env, keys);
+      return new Response(JSON.stringify({ success: true, key: generatedKey }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (method === 'DELETE') {
+      const { id } = await request.json();
+      let keys = await getApiKeys(env);
+      keys = keys.filter(k => k.id !== id);
+      await saveApiKeys(env, keys);
+      return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // 10. Model settings and mappings
+  if (url.pathname === '/api/settings') {
+    if (method === 'GET') {
+      const customMap = await getCustomModelMap(env);
+      return new Response(JSON.stringify({ customModelMap: customMap }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    if (method === 'POST') {
+      const { customModelMap } = await request.json();
+      if (!customModelMap || typeof customModelMap !== 'object') {
+        return new Response(JSON.stringify({ error: 'Invalid customModelMap payload' }), { status: 400 });
+      }
+      await saveCustomModelMap(env, customModelMap);
+      return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  return new Response(JSON.stringify({ error: 'Endpoint not found' }), { status: 404 });
+}
+
+// ----------------------------------------------------
+// UI Frontend Page Servers (Split Structure)
+// ----------------------------------------------------
+
+// 1. Landing / Login Page
+async function handleLandingPage(request, env, ctx) {
+  const isLoggedIn = await verifyAdminCookie(request, env);
+
+  let actionCardHtml = '';
+  if (isLoggedIn) {
+    actionCardHtml = `
+      <div class="section-card" style="text-align: center;">
+        <div class="section-title" style="justify-content: center; margin-bottom: 10px;">欢迎回来</div>
+        <p style="font-size: 14px; color: var(--text-muted); margin-bottom: 20px;">您当前已登录管理员身份。</p>
+        <a href="/admin" class="btn btn-primary" style="width: 100%; text-decoration: none; display: flex; align-items: center; justify-content: center;">进入后台管理面板</a>
+        <button class="btn btn-secondary" onclick="submitLogout()" style="width: 100%; margin-top: 12px;">安全退出</button>
+      </div>
+    `;
+  } else {
+    actionCardHtml = `
+      <div class="section-card" id="login-form-card">
+        <div class="section-title">后台管理员登录</div>
+        <div class="form-group" style="margin-top: 15px;">
+          <label for="login-password">管理员密码</label>
+          <input type="password" id="login-password" placeholder="请输入管理员密码" onkeydown="if(event.key==='Enter')submitLogin()">
+        </div>
+        <button class="btn btn-primary" onclick="submitLogin()" style="width: 100%; margin-top: 10px;">登录</button>
+      </div>
+    `;
+  }
+
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workers AI to API - Cloudflare Workers AI Proxy</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --border-color: rgba(255, 255, 255, 0.06);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+      --accent-color: #a78bfa;
+      --input-bg: rgba(0, 0, 0, 0.2);
+      --input-border: rgba(255, 255, 255, 0.1);
+      --input-text: #f1f5f9;
+      --btn-secondary-bg: rgba(255, 255, 255, 0.08);
+      --btn-secondary-hover: rgba(255, 255, 255, 0.12);
+      --btn-secondary-text: #f1f5f9;
+      --modal-overlay-bg: rgba(0, 0, 0, 0.7);
+    }
+
+    :root[data-theme="light"] {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --border-color: rgba(0, 0, 0, 0.08);
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --primary-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+      --accent-color: #7c3aed;
+      --input-bg: #f1f5f9;
+      --input-border: rgba(0, 0, 0, 0.1);
+      --input-text: #0f172a;
+      --btn-secondary-bg: #e2e8f0;
+      --btn-secondary-hover: #cbd5e1;
+      --btn-secondary-text: #0f172a;
+      --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+    }
+
+    .action-btn-group {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      z-index: 1000;
+    }
+
+    .floating-btn {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      transition: all 0.2s;
+      z-index: 1000;
+      outline: none;
+    }
+    
+    .floating-btn:hover {
+      transform: scale(1.05);
+      border-color: var(--accent-color);
+    }
+
+    /* Modal Styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: var(--modal-overlay-bg);
+      backdrop-filter: blur(5px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease-in-out;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 400px;
+      padding: 28px;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      transform: scale(0.95);
+      transition: transform 0.25s ease-in-out;
+    }
+
+    .modal-overlay.active .modal-card {
+      transform: scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 16px;
+    }
+
+    .modal-header h3 {
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      outline: none;
+      transition: color 0.2s;
+    }
+
+    .close-btn:hover {
+      color: var(--text-main);
+    }
+
+    /* Theme transitions */
+    body, .stat-card, .floating-btn, input, .btn-secondary, .modal-card {
+      transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+
+    h1, h2, h3 {
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .login-container {
+      max-width: 440px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .login-header {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+
+    .logo-icon {
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: var(--primary-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: white;
+      font-size: 24px;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .logo-text {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: var(--primary-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .stat-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-title {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .progress-container {
+      width: 100%;
+      height: 8px;
+      background-color: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--primary-gradient);
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .section-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .form-group label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    input {
+      background-color: var(--input-bg);
+      border: 1px solid var(--input-border);
+      color: var(--input-text);
+      padding: 12px 16px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus {
+      border-color: var(--accent-color);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: var(--primary-gradient);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background-color: var(--btn-secondary-bg);
+      color: var(--btn-secondary-text);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--btn-secondary-hover);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Floating Action Buttons -->
+  <div class="action-btn-group">
+    <button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
+      <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+      </svg>
+      <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+      </svg>
+    </button>
+    <button class="floating-btn" onclick="openLoginModal()" title="${isLoggedIn ? '管理后台' : '管理员登录'}" style="background: var(--primary-gradient); color: white; border: none;">
+      ${isLoggedIn ? `
+        <!-- User Check Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <polyline points="16 11 18 13 22 9" />
+        </svg>
+      ` : `
+        <!-- User Icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
+      `}
+    </button>
+  </div>
+
+  <div class="login-container">
+    <div class="login-header">
+      <div class="logo-icon">AI</div>
+      <span class="logo-text">Workers AI to API</span>
+    </div>
+
+    <!-- Public stats widget -->
+    <div class="stat-card">
+      <div class="stat-title">所有账号今日用量汇总</div>
+      <div class="stat-value" id="public-neurons">0</div>
+      <div class="progress-container">
+        <div class="progress-bar" id="public-progress" style="width: 0%;"></div>
+      </div>
+      <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+        <span id="public-limit-desc">总限额: 0 Neurons</span>
+        <span id="public-percent-desc">0%</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Admin Login / Dashboard Quick Entry -->
+  <div class="modal-overlay" id="login-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="modal-title">${isLoggedIn ? '管理面板入口' : '管理员登录'}</h3>
+        <button onclick="closeLoginModal()" class="close-btn">
+          <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      
+      ${isLoggedIn ? `
+        <div style="text-align: center; display: flex; flex-direction: column; gap: 16px; margin-top: 10px;">
+          <div style="font-size: 40px;">🔑</div>
+          <p style="font-size: 14px; color: var(--text-muted); line-height: 1.5;">您当前已登录管理员身份。</p>
+          <a href="/admin" class="btn btn-primary" style="width: 100%; text-decoration: none; display: flex; align-items: center; justify-content: center; height: 42px;">进入后台管理面板</a>
+          <button class="btn btn-secondary" onclick="submitLogout()" style="width: 100%; height: 42px;">安全退出</button>
+        </div>
+      ` : `
+        <div class="form-group" style="margin-top: 10px;">
+          <label for="login-password">管理员密码</label>
+          <input type="password" id="login-password" placeholder="请输入管理员密码" onkeydown="if(event.key==='Enter')submitLogin()">
+        </div>
+        <div class="modal-footer" style="margin-top: 10px; display: flex; gap: 12px; justify-content: flex-end; width: 100%;">
+          <button class="btn btn-secondary" onclick="closeLoginModal()" style="height: 38px;">取消</button>
+          <button class="btn btn-primary" onclick="submitLogin()" style="height: 38px;">登录</button>
+        </div>
+      `}
+    </div>
+  </div>
+
+  <script>
+    function initTheme() {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      } else {
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const defaultTheme = systemPrefersDark ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', defaultTheme);
+      }
+      updateThemeIcons();
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      updateThemeIcons();
+    }
+
+    function updateThemeIcons() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const sunIcons = document.querySelectorAll('.theme-icon-sun');
+      const moonIcons = document.querySelectorAll('.theme-icon-moon');
+      if (currentTheme === 'light') {
+        sunIcons.forEach(el => el.style.display = 'none');
+        moonIcons.forEach(el => el.style.display = 'block');
+      } else {
+        sunIcons.forEach(el => el.style.display = 'block');
+        moonIcons.forEach(el => el.style.display = 'none');
+      }
+    }
+
+    function openLoginModal() {
+      document.getElementById('login-modal').classList.add('active');
+      const pwdInput = document.getElementById('login-password');
+      if (pwdInput) {
+        pwdInput.value = '';
+        setTimeout(() => pwdInput.focus(), 100);
+      }
+    }
+
+    function closeLoginModal() {
+      document.getElementById('login-modal').classList.remove('active');
+    }
+
+    initTheme();
+
+    window.onload = function() {
+      loadPublicSummary();
+    };
+
+    async function loadPublicSummary() {
+      try {
+        const res = await fetch('/api/usage/summary');
+        const data = await res.json();
+        
+        document.getElementById('public-neurons').innerText = Number(data.totalNeuronsToday).toLocaleString();
+        document.getElementById('public-progress').style.width = data.usagePercentage + '%';
+        document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
+        document.getElementById('public-percent-desc').innerText = data.usagePercentage + '%';
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+
+
+    async function submitLogin() {
+      const password = document.getElementById('login-password').value;
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password })
+      });
+      if (res.ok) {
+        window.location.href = '/admin';
+      } else {
+        const data = await res.json();
+        alert('登录失败: ' + (data.error || '密码不正确！'));
+      }
+    }
+
+    async function submitLogout() {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      if (res.ok) {
+        window.location.reload();
+      }
+    }
+  </script>
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// 2. Admin Dashboard Console Page
+function handleAdminPage(request, env, ctx) {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Workers AI to API Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --border-color: rgba(255, 255, 255, 0.06);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+      --accent-color: #a78bfa;
+      --success-color: #10b981;
+      --warning-color: #f59e0b;
+      --danger-color: #ef4444;
+      --sidebar-width: 260px;
+      --sidebar-bg: #090d16;
+      --sidebar-menu-hover: rgba(255, 255, 255, 0.05);
+      --input-bg: rgba(255, 255, 255, 0.08);
+      --input-border: rgba(255, 255, 255, 0.1);
+      --table-header-bg: rgba(0, 0, 0, 0.2);
+      --btn-secondary-bg: rgba(255, 255, 255, 0.08);
+      --btn-secondary-hover: rgba(255, 255, 255, 0.12);
+      --modal-overlay-bg: rgba(0, 0, 0, 0.7);
+      --section-item-bg: rgba(255, 255, 255, 0.02);
+    }
+
+    :root[data-theme="light"] {
+      --bg-color: #f8fafc;
+      --card-bg: #ffffff;
+      --border-color: rgba(0, 0, 0, 0.08);
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --primary-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
+      --accent-color: #7c3aed;
+      --sidebar-bg: #f1f5f9;
+      --sidebar-menu-hover: rgba(0, 0, 0, 0.04);
+      --input-bg: #f1f5f9;
+      --input-text: #0f172a;
+      --input-border: rgba(0, 0, 0, 0.1);
+      --table-header-bg: #f8fafc;
+      --btn-secondary-bg: #e2e8f0;
+      --btn-secondary-hover: #cbd5e1;
+      --modal-overlay-bg: rgba(0, 0, 0, 0.5);
+      --section-item-bg: rgba(0, 0, 0, 0.02);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    h1, h2, h3, h4 {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+    }
+
+    button, input, select {
+      font-family: inherit;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Layout */
+    .app-container {
+      display: flex;
+      flex: 1;
+    }
+
+    /* Sidebar */
+    aside {
+      width: var(--sidebar-width);
+      background-color: var(--sidebar-bg);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 100;
+    }
+
+    .logo-area {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--primary-gradient);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      color: white;
+      font-size: 20px;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .logo-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: var(--primary-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .nav-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex: 1;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      color: var(--text-muted);
+      text-decoration: none;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      transition: all 0.2s ease-in-out;
+    }
+
+    .nav-item:hover, .nav-item.active {
+      color: var(--text-main);
+      background-color: var(--sidebar-menu-hover);
+    }
+
+    .nav-item.active {
+      background: rgba(139, 92, 246, 0.15);
+      color: var(--accent-color);
+      border-left: 3px solid var(--accent-color);
+      border-top-left-radius: 0;
+      border-bottom-left-radius: 0;
+    }
+
+    .aside-footer {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    /* Main Area */
+    main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 30px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* Cards */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 20px;
+    }
+
+    .stat-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+      overflow: hidden;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: var(--primary-gradient);
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+
+    .stat-card:hover::before {
+      opacity: 1;
+    }
+
+    .stat-title {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-size: 32px;
+      font-weight: 700;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    .stat-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    /* Progress bar */
+    .progress-container {
+      width: 100%;
+      height: 8px;
+      background-color: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-top: 4px;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: var(--primary-gradient);
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    /* Sections */
+    .section-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Forms */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .form-group label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    input, select, textarea {
+      background-color: var(--input-bg);
+      border: 1px solid var(--input-border);
+      color: var(--text-main);
+      padding: 12px 16px;
+      border-radius: 8px;
+      outline: none;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent-color);
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: var(--primary-gradient);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      opacity: 0.9;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background-color: var(--btn-secondary-bg);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      background-color: var(--btn-secondary-hover);
+    }
+
+    .btn-danger {
+      background-color: var(--danger-color);
+      color: white;
+    }
+
+    .btn-danger:hover {
+      opacity: 0.9;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 14px;
+    }
+
+    th {
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .badge-success {
+      background-color: rgba(16, 185, 129, 0.15);
+      color: var(--success-color);
+    }
+
+    .badge-warning {
+      background-color: rgba(245, 158, 11, 0.15);
+      color: var(--warning-color);
+    }
+
+    .badge-danger {
+      background-color: rgba(239, 68, 68, 0.15);
+      color: var(--danger-color);
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: var(--modal-overlay-bg);
+      backdrop-filter: blur(5px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease-in-out;
+    }
+
+    .modal-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+    .modal-card {
+      background-color: var(--card-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      width: 90%;
+      max-width: 500px;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      transform: scale(0.95);
+      transition: transform 0.25s ease-in-out;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-overlay.active .modal-card {
+      transform: scale(1);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 12px;
+    }
+
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      border-top: 1px solid var(--border-color);
+      padding-top: 16px;
+    }
+
+    /* Charts Container */
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 900px) {
+      .charts-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart-container {
+      position: relative;
+      height: 300px;
+      width: 100%;
+    }
+
+    /* Utility */
+    .hidden {
+      display: none !important;
+    }
+
+    .flex-row-gap {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    /* Mobile Responsive Sidebar */
+    @media (max-width: 768px) {
+      aside {
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+      }
+      aside.active {
+        transform: translateX(0);
+      }
+      main {
+        margin-left: 0;
+        padding: 20px;
+      }
+      .mobile-nav-toggle {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background-color: var(--card-bg);
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        cursor: pointer;
+      }
+    }
+
+    @media (min-width: 769px) {
+      .mobile-nav-toggle {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- App Header for Mobile Toggle -->
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--sidebar-bg); border-bottom: 1px solid var(--border-color); z-index: 90;" class="mobile-header">
+    <div class="logo-area" style="margin-bottom: 0;">
+      <div class="logo-icon">AI</div>
+      <span class="logo-text">Workers AI to API</span>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <button onclick="toggleTheme()" title="切换日间/夜间模式" style="background: none; border: none; color: var(--text-main); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center; outline: none;">
+        <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+        </svg>
+        <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
+          <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+        </svg>
+      </button>
+      <button class="mobile-nav-toggle" onclick="toggleSidebar()">
+        <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+        <span>菜单</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <!-- Sidebar -->
+    <aside id="sidebar">
+      <div class="logo-area">
+        <div class="logo-icon">AI</div>
+        <span class="logo-text">Workers AI to API</span>
+      </div>
+      
+      <div class="nav-menu">
+        <div class="nav-item active" id="menu-overview" onclick="switchTab('overview')">
+          <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+          控制台
+        </div>
+        <div class="nav-item" id="menu-accounts" onclick="switchTab('accounts')">
+          <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+          账号管理
+        </div>
+        <div class="nav-item" id="menu-keys" onclick="switchTab('keys')">
+          <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
+          API 密钥
+        </div>
+        <div class="nav-item" id="menu-settings" onclick="switchTab('settings')">
+          <svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+          自定义模型映射
+        </div>
+      </div>
+
+      <div class="aside-footer" style="display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+        <button class="btn btn-secondary" onclick="toggleTheme()" title="切换日间/夜间模式" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
+          <svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+          </svg>
+          <svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
+            <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+          </svg>
+          <span>切换主题</span>
+        </button>
+        <button class="btn btn-secondary" onclick="logout()">退出登录</button>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main>
+      <div id="auth-views" style="display: flex; flex-direction: column; gap: 30px; width: 100%;">
+        
+        <!-- Header -->
+        <header>
+          <div>
+            <h1 style="font-size: 26px; font-weight: 700;" id="view-title">控制台</h1>
+            <p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">实时监控 Cloudflare AI 账号及接口状态</p>
+          </div>
+          <div class="user-profile">
+            <span class="badge badge-success">系统正常运行</span>
+          </div>
+        </header>
+
+        <!-- TAB: Overview -->
+        <div id="tab-overview" class="tab-content">
+          <div class="card-grid">
+            <div class="stat-card">
+              <div class="stat-title">今日总消耗量</div>
+              <div class="stat-value" id="stat-total-neurons">0</div>
+              <div class="progress-container">
+                <div class="progress-bar" id="stat-neurons-progress" style="width: 0%;"></div>
+              </div>
+              <div class="stat-desc" id="stat-neurons-desc">0 / 0 Neurons (0.00%)</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-title">已绑定账号</div>
+              <div class="stat-value" id="stat-accounts-count">0</div>
+              <div class="stat-desc">活跃中的 Cloudflare 账号数</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-title">代理 API 密钥</div>
+              <div class="stat-value" id="stat-keys-count">0</div>
+              <div class="stat-desc">已配额的第三方调用 Key 数</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-title">节省成本 (估算)</div>
+              <div class="stat-value" id="stat-cost-saving">$0.00</div>
+              <div class="stat-desc">对比 OpenAI completions 同等额度价格</div>
+            </div>
+          </div>
+
+          <!-- Proxy URL Info -->
+          <div class="section-card" style="margin-top: 24px;">
+            <div class="section-title">接入信息 (OpenAI SDK 格式)</div>
+            <div class="form-group" style="margin-bottom: 0;">
+              <label>API 基础地址 (API Base URL)</label>
+              <div style="display: flex; gap: 10px;">
+                <input type="text" id="proxy-base-url" readonly style="flex: 1;" value="">
+                <button class="btn btn-secondary" onclick="copyProxyUrl()">复制地址</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts -->
+          <div class="charts-grid" style="margin-top: 24px;">
+            <div class="section-card">
+              <div class="section-title">过去 7 日消耗走势 (Neurons)</div>
+              <div class="chart-container">
+                <canvas id="historyChart"></canvas>
+              </div>
+            </div>
+            <div class="section-card">
+              <div class="section-title">今日模型消耗占比</div>
+              <div class="chart-container">
+                <canvas id="modelsChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detailed Accounts Usage Grid -->
+          <div class="section-card" style="margin-top: 24px;">
+            <div class="section-header">
+              <div class="section-title">账号用量明细</div>
+              <button class="btn btn-secondary" onclick="loadUsageDetails()">刷新用量</button>
+            </div>
+            <div id="accounts-usage-list" style="display: flex; flex-direction: column; gap: 16px;">
+              <!-- Individual account progress item -->
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB: Accounts -->
+        <div id="tab-accounts" class="tab-content hidden">
+          <div class="section-card">
+            <div class="section-header">
+              <div class="section-title">账号配置</div>
+              <button class="btn btn-primary" onclick="openAddAccountModal()">
+                <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                添加账号
+              </button>
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>别名</th>
+                  <th>Account ID</th>
+                  <th>API Token</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="accounts-table-body">
+                <!-- Accounts rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB: API Keys -->
+        <div id="tab-keys" class="tab-content hidden">
+          <div class="section-card">
+            <div class="section-header">
+              <div class="section-title">API 密钥管理</div>
+              <button class="btn btn-primary" onclick="openAddKeyModal()">
+                <svg style="width: 16px; height: 16px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                生成新密钥
+              </button>
+            </div>
+            
+            <div style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.2); padding: 16px; border-radius: 12px; font-size: 13px; color: var(--warning-color); line-height: 1.5; margin-bottom: 10px;" id="no-key-warning" class="hidden">
+              <strong>提示：</strong> 目前未配置任何 API 密钥。反代 API (/v1/...) 处于公开可被任何人调用的状态。建议点击“生成新密钥”为您的接口加上调用凭证鉴权。
+            </div>
+
+            <table>
+              <thead>
+                <tr>
+                  <th>密钥描述</th>
+                  <th>API Key</th>
+                  <th>创建时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="keys-table-body">
+                <!-- Keys rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- TAB: Settings (Model Mapping) -->
+        <div id="tab-settings" class="tab-content hidden">
+          <div class="section-card">
+            <div class="section-title">自定义模型映射 (Model Mappings)</div>
+            <p style="font-size: 13px; color: var(--text-muted); margin-top: -10px;">您可以设置请求中的模型名字（例如 gpt-3.5-turbo）应该被反向代理路由去哪一个具体的 Cloudflare AI 对应模型。若请求的模型以 @cf/ 开头，则默认透传不会经过映射。</p>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 15px; background-color: var(--section-item-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); margin-top: 10px;">
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>请求模型名称 (OpenAI ID/别名)</label>
+                <input type="text" id="map-source" placeholder="如: gpt-3.5-turbo">
+              </div>
+              <div class="form-group" style="margin-bottom: 0;">
+                <label>CF 目标模型路径 (Cloudflare Model Path)</label>
+                <input type="text" id="map-target" placeholder="如: @cf/meta/llama-3.1-8b-instruct">
+              </div>
+              <div style="display: flex; align-items: flex-end;">
+                <button class="btn btn-primary" onclick="addMapping()" style="height: 45px;">添加/修改</button>
+              </div>
+            </div>
+
+            <table style="margin-top: 20px;">
+              <thead>
+                <tr>
+                  <th>客户端请求模型</th>
+                  <th>映射后 Cloudflare 目标模型</th>
+                  <th>类型</th>
+                  <th style="width: 100px;">操作</th>
+                </tr>
+              </thead>
+              <tbody id="mappings-table-body">
+                <!-- Mapping rows -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- Modal: Add Cloudflare Account -->
+  <div class="modal-overlay" id="account-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="account-modal-title">添加 Cloudflare 账号</h3>
+        <button onclick="closeAccountModal()" style="background: none; border: none; color: var(--text-muted); cursor: pointer;">
+          <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <input type="hidden" id="account-id-edit">
+      <div class="form-group">
+        <label for="account-name">账号别名 (如: 主账号 A)</label>
+        <input type="text" id="account-name" placeholder="请输入备注名">
+      </div>
+      <div class="form-group">
+        <label for="account-id">Cloudflare Account ID</label>
+        <input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面">
+      </div>
+      <div class="form-group">
+        <label for="account-token">Workers AI API Token (需要创建并赋予以下 3 个权限):</label>
+        <div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.1); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
+          • Workers AI &gt; Read<br>
+          • Workers AI &gt; Edit<br>
+          • Account Analytics &gt; Read
+        </div>
+        <input type="text" id="account-token" placeholder="CF 账号 API Token (会安全遮蔽保存)">
+      </div>
+      
+      <div id="test-result-alert" style="display: none; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 500;"></div >
+
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="testConnection()" id="btn-test-conn">测试连接</button>
+        <button class="btn btn-primary" onclick="saveAccount()">保存账号</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Add API Key -->
+  <div class="modal-overlay" id="key-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>生成新 API 密钥</h3>
+        <button onclick="closeKeyModal()" style="background: none; border: none; color: var(--text-muted); cursor: pointer;">
+          <svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <div class="form-group">
+        <label for="key-name">密钥描述/使用客户端 (如: Cursor / NextChat)</label>
+        <input type="text" id="key-name" placeholder="请输入描述名">
+      </div>
+      <div class="form-group">
+        <label for="key-val">API 密钥值 (可选，为空则随机生成 sk-wa-...)</label>
+        <input type="text" id="key-val" placeholder="留空则随机生成密钥">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeKeyModal()">取消</button>
+        <button class="btn btn-primary" onclick="saveKey()">生成密钥</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentTab = 'overview';
+    let historyChart = null;
+    let modelsChart = null;
+    const defaultMappings = ${JSON.stringify(DEFAULT_MODEL_MAP)};
+    let customMappings = {};
+
+    function initTheme() {
+      const savedTheme = localStorage.getItem('theme');
+      if (savedTheme) {
+        document.documentElement.setAttribute('data-theme', savedTheme);
+      } else {
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const defaultTheme = systemPrefersDark ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', defaultTheme);
+      }
+      updateThemeIcons();
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem('theme', newTheme);
+      updateThemeIcons();
+      // Redraw charts to update colors
+      if (currentTab === 'overview') {
+        loadUsageDetails();
+      }
+    }
+
+    function updateThemeIcons() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const sunIcons = document.querySelectorAll('.theme-icon-sun');
+      const moonIcons = document.querySelectorAll('.theme-icon-moon');
+      if (currentTheme === 'light') {
+        sunIcons.forEach(el => el.style.display = 'none');
+        moonIcons.forEach(el => el.style.display = 'block');
+      } else {
+        sunIcons.forEach(el => el.style.display = 'block');
+        moonIcons.forEach(el => el.style.display = 'none');
+      }
+    }
+
+    initTheme();
+
+    window.onload = function() {
+      // Set Proxy URL base
+      document.getElementById('proxy-base-url').value = window.location.origin + '/v1';
+      switchTab('overview');
+    };
+
+    function toggleSidebar() {
+      document.getElementById('sidebar').classList.toggle('active');
+    }
+
+    async function logout() {
+      const res = await fetch('/api/auth/logout', { method: 'POST' });
+      if (res.ok) {
+        window.location.href = '/';
+      }
+    }
+
+    function switchTab(tabName) {
+      currentTab = tabName;
+      // Update menu items
+      document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+      document.getElementById('menu-' + tabName).classList.add('active');
+      
+      // Update views
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.getElementById('tab-' + tabName).classList.remove('hidden');
+      
+      // Update Title
+      const titles = {
+        overview: '控制台',
+        accounts: '账号管理',
+        keys: 'API 密钥',
+        settings: '自定义模型映射'
+      };
+      document.getElementById('view-title').innerText = titles[tabName];
+      
+      // Hide mobile sidebar
+      document.getElementById('sidebar').classList.remove('active');
+
+      // Load data
+      if (tabName === 'overview') {
+        loadUsageDetails();
+      } else if (tabName === 'accounts') {
+        loadAccounts();
+      } else if (tabName === 'keys') {
+        loadKeys();
+      } else if (tabName === 'settings') {
+        loadSettings();
+      }
+    }
+
+    // Authenticated API request wrapper
+    async function apiFetch(path, options = {}) {
+      const res = await fetch(path, options);
+      if (res.status === 401) {
+        window.location.href = '/';
+        throw new Error('Unauthorized');
+      }
+      return res;
+    }
+
+    // ------------------------------------------------
+    // Tab: Overview Data and Charts
+    // ------------------------------------------------
+    async function loadUsageDetails() {
+      try {
+        const res = await apiFetch('/api/accounts/usage');
+        const data = await res.json();
+        
+        let totalUsageToday = 0;
+        let totalLimit = data.length * 10000;
+        let historyData = {};
+        let modelsToday = {};
+
+        const usageList = document.getElementById('accounts-usage-list');
+        usageList.innerHTML = '';
+
+        if (data.length === 0) {
+          usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
+          return;
+        }
+
+        data.forEach(account => {
+          totalUsageToday += account.usageToday;
+
+          // Individual account UI
+          const percentage = Math.min(100, parseFloat(((account.usageToday / 10000) * 100).toFixed(1)));
+          const warningClass = account.status === 'error' ? 'badge-danger' : (percentage >= 90 ? 'badge-warning' : 'badge-success');
+          const statusText = account.status === 'error' ? '连接异常' : (percentage >= 100 ? '用尽 (10k)' : '正常运行');
+          
+          const item = document.createElement('div');
+          item.className = 'section-card';
+          item.style.padding = '18px';
+          item.style.backgroundColor = 'rgba(255,255,255,0.01)';
+          item.innerHTML = \`
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+              <div>
+                <strong style="font-size:15px;">\${account.name}</strong>
+                <span style="font-size:12px; color: var(--text-muted); margin-left: 8px;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
+              </div>
+              <span class="badge \${warningClass}">\${statusText}</span>
+            </div>
+            <div class="progress-container">
+              <div class="progress-bar" style="width: \${percentage}%; background: \${account.status === 'error' ? 'var(--danger-color)' : 'var(--primary-gradient)'}"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 4px;">
+              <span>今日已用: \${account.usageToday.toLocaleString()} / 10,000 Neurons</span>
+              <span>\${percentage}%</span>
+            </div>
+            \${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 6px;">错误信息: \${account.error}</div>\` : ''}
+          \`;
+          usageList.appendChild(item);
+
+          if (account.history) {
+            account.history.forEach(h => {
+              historyData[h.date] = (historyData[h.date] || 0) + h.neurons;
+            });
+          }
+
+          if (account.modelsToday) {
+            account.modelsToday.forEach(m => {
+              modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+            });
+          }
+        });
+
+        document.getElementById('stat-total-neurons').innerText = totalUsageToday.toLocaleString();
+        document.getElementById('stat-accounts-count').innerText = data.length;
+        
+        const overallPercentage = totalLimit > 0 ? parseFloat(((totalUsageToday / totalLimit) * 100).toFixed(2)) : 0;
+        document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
+        document.getElementById('stat-neurons-desc').innerText = \`\${totalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage}%)\`;
+        
+        const costSaved = (totalUsageToday / 1000) * 0.011;
+        document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
+
+        const keysRes = await apiFetch('/api/keys');
+        const keys = await keysRes.json();
+        document.getElementById('stat-keys-count').innerText = keys.length;
+
+        const dates = Object.keys(historyData).sort();
+        const neuronsData = dates.map(d => historyData[d]);
+        renderHistoryChart(dates, neuronsData);
+
+        const models = Object.keys(modelsToday);
+        const modelsNeurons = models.map(m => modelsToday[m]);
+        renderModelsChart(models, modelsNeurons);
+
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderHistoryChart(labels, data) {
+      if (historyChart) historyChart.destroy();
+      
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
+      const textColor = isLight ? '#64748b' : '#94a3b8';
+
+      const ctx = document.getElementById('historyChart').getContext('2d');
+      historyChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Neuron 消耗数',
+            data: data,
+            borderColor: '#a78bfa',
+            backgroundColor: 'rgba(167, 139, 250, 0.1)',
+            borderWidth: 2,
+            tension: 0.3,
+            fill: true
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              grid: { color: gridColor },
+              ticks: { color: textColor }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: textColor }
+            }
+          }
+        }
+      });
+    }
+
+    function renderModelsChart(labels, data) {
+      if (modelsChart) modelsChart.destroy();
+      
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      const textColor = isLight ? '#64748b' : '#94a3b8';
+
+      const ctx = document.getElementById('modelsChart').getContext('2d');
+      if (labels.length === 0) return;
+
+      modelsChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: labels.map(l => l.split('/').pop()),
+          datasets: [{
+            data: data,
+            backgroundColor: [
+              '#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'
+            ],
+            borderWidth: 0
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: textColor, boxWidth: 12 }
+            }
+          }
+        }
+      });
+    }
+
+    function copyProxyUrl() {
+      const el = document.getElementById('proxy-base-url');
+      el.select();
+      document.execCommand('copy');
+      alert('已复制代理基础地址！请将其配置在您软件的 API Base URL 中。');
+    }
+
+    // ------------------------------------------------
+    // Tab: Accounts CRUD
+    // ------------------------------------------------
+    async function loadAccounts() {
+      try {
+        const res = await apiFetch('/api/accounts');
+        const accounts = await res.json();
+        
+        const tbody = document.getElementById('accounts-table-body');
+        tbody.innerHTML = '';
+        
+        if (accounts.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">暂无配置的 Cloudflare 账号</td></tr>';
+          return;
+        }
+
+        accounts.forEach(acc => {
+          const maskedToken = acc.apiToken.length > 8 ? acc.apiToken.substring(0, 4) + '...' + acc.apiToken.substring(acc.apiToken.length - 4) : '********';
+          const tr = document.createElement('tr');
+          tr.innerHTML = \`
+            <td><strong>\${acc.name}</strong></td>
+            <td><code>\${acc.accountId}</code></td>
+            <td><code>\${maskedToken}</code></td>
+            <td>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="editAccount('\${acc.id}', '\${acc.name}', '\${acc.accountId}', '\${acc.apiToken}')">编辑</button>
+                <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteAccount('\${acc.id}')">删除</button>
+              </div>
+            </td>
+          \`;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function openAddAccountModal() {
+      document.getElementById('account-modal-title').innerText = '添加 Cloudflare 账号';
+      document.getElementById('account-id-edit').value = '';
+      document.getElementById('account-name').value = '';
+      document.getElementById('account-id').value = '';
+      document.getElementById('account-token').value = '';
+      document.getElementById('test-result-alert').style.display = 'none';
+      document.getElementById('account-modal').classList.add('active');
+    }
+
+    function closeAccountModal() {
+      document.getElementById('account-modal').classList.remove('active');
+    }
+
+    function editAccount(id, name, accountId, apiToken) {
+      document.getElementById('account-modal-title').innerText = '编辑 Cloudflare 账号';
+      document.getElementById('account-id-edit').value = id;
+      document.getElementById('account-name').value = name;
+      document.getElementById('account-id').value = accountId;
+      document.getElementById('account-token').value = apiToken;
+      document.getElementById('test-result-alert').style.display = 'none';
+      document.getElementById('account-modal').classList.add('active');
+    }
+
+    async function testConnection() {
+      const accountId = document.getElementById('account-id').value;
+      const apiToken = document.getElementById('account-token').value;
+      const id = document.getElementById('account-id-edit').value;
+      
+      const alertEl = document.getElementById('test-result-alert');
+      alertEl.style.display = 'block';
+      alertEl.className = 'badge badge-warning';
+      alertEl.innerText = '测试中...';
+
+      try {
+        const res = await apiFetch('/api/accounts/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, accountId, apiToken })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alertEl.className = 'badge badge-success';
+          alertEl.innerText = '连接成功！API 权限有效';
+        } else {
+          alertEl.className = 'badge badge-danger';
+          alertEl.innerText = '连接失败: ' + data.error;
+        }
+      } catch (e) {
+        alertEl.className = 'badge badge-danger';
+        alertEl.innerText = '连接超时或异常！';
+      }
+    }
+
+    async function saveAccount() {
+      const id = document.getElementById('account-id-edit').value;
+      const name = document.getElementById('account-name').value;
+      const accountId = document.getElementById('account-id').value;
+      const apiToken = document.getElementById('account-token').value;
+
+      if (!accountId || !apiToken) {
+        alert('Account ID 和 API Token 均为必填项！');
+        return;
+      }
+
+      const res = await apiFetch('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, name, accountId, apiToken })
+      });
+
+      if (res.ok) {
+        closeAccountModal();
+        loadAccounts();
+      } else {
+        alert('保存失败！');
+      }
+    }
+
+    async function deleteAccount(id) {
+      if (!confirm('确定要删除这个 Cloudflare 账号吗？')) return;
+      const res = await apiFetch('/api/accounts', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) loadAccounts();
+    }
+
+    // ------------------------------------------------
+    // Tab: API Keys CRUD
+    // ------------------------------------------------
+    async function loadKeys() {
+      try {
+        const res = await apiFetch('/api/keys');
+        const keys = await res.json();
+        
+        const tbody = document.getElementById('keys-table-body');
+        tbody.innerHTML = '';
+        
+        if (keys.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">暂无配置的 API 密钥</td></tr>';
+          document.getElementById('no-key-warning').classList.remove('hidden');
+          return;
+        } else {
+          document.getElementById('no-key-warning').classList.add('hidden');
+        }
+
+        keys.forEach(k => {
+          const tr = document.createElement('tr');
+          const dateStr = new Date(k.createdAt).toLocaleString();
+          tr.innerHTML = \`
+            <td><strong>\${sen(k.name)}</strong></td>
+            <td>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <code id="key-val-\${k.id}">\${k.key.substring(0, 10)}...</code>
+                <button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="copyKeyText('\${k.key}')">复制</button>
+              </div>
+            </td>
+            <td>\${dateStr}</td>
+            <td>
+              <button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteKey('\${k.id}')">删除</button>
+            </td>
+          \`;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function sen(str) {
+      return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function copyKeyText(val) {
+      const input = document.createElement('input');
+      input.value = val;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand('copy');
+      document.body.removeChild(input);
+      alert('API Key 复制成功！');
+    }
+
+    function openAddKeyModal() {
+      document.getElementById('key-name').value = '';
+      document.getElementById('key-val').value = '';
+      document.getElementById('key-modal').classList.add('active');
+    }
+
+    function closeKeyModal() {
+      document.getElementById('key-modal').classList.remove('active');
+    }
+
+    async function saveKey() {
+      const name = document.getElementById('key-name').value;
+      const key = document.getElementById('key-val').value;
+      
+      if (!name) {
+        alert('请输入描述名称！');
+        return;
+      }
+
+      const res = await apiFetch('/api/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, key })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        closeKeyModal();
+        loadKeys();
+        alert('密钥生成成功！\\n请务必复制保存此密钥，关闭后将无法再次完整查看：\\n\\n' + data.key);
+      } else {
+        alert('保存密钥失败！');
+      }
+    }
+
+    async function deleteKey(id) {
+      if (!confirm('确定要删除这个 API 密钥吗？')) return;
+      const res = await apiFetch('/api/keys', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) loadKeys();
+    }
+
+    // ------------------------------------------------
+    // Tab: Model Settings (Mapping)
+    // ------------------------------------------------
+    async function loadSettings() {
+      try {
+        const res = await apiFetch('/api/settings');
+        const data = await res.json();
+        customMappings = data.customModelMap || {};
+        
+        const tbody = document.getElementById('mappings-table-body');
+        tbody.innerHTML = '';
+
+        const combined = { ...defaultMappings, ...customMappings };
+        
+        Object.keys(combined).forEach(source => {
+          const target = combined[source];
+          const isCustom = customMappings.hasOwnProperty(source);
+          const typeText = isCustom ? '<span class="badge badge-warning">自定义</span>' : '<span class="badge badge-success">系统默认</span>';
+          
+          const tr = document.createElement('tr');
+          tr.innerHTML = \`
+            <td><code>\${source}</code></td>
+            <td><code>\${target}</code></td>
+            <td>\${typeText}</td>
+            <td>
+              \${isCustom ? \`<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteMapping('\${source}')">重置</button>\` : '<span style="color: var(--text-muted); font-size:12px;">只读</span>'}
+            </td>
+          \`;
+          tbody.appendChild(tr);
+        });
+
+      } catch(e) {
+        console.error(e);
+      }
+    }
+
+    async function addMapping() {
+      const source = document.getElementById('map-source').value.trim();
+      const target = document.getElementById('map-target').value.trim();
+
+      if (!source || !target) {
+        alert('请求模型名称和目标模型路径不能为空！');
+        return;
+      }
+
+      customMappings[source] = target;
+      
+      const res = await apiFetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customModelMap: customMappings })
+      });
+
+      if (res.ok) {
+        document.getElementById('map-source').value = '';
+        document.getElementById('map-target').value = '';
+        loadSettings();
+      } else {
+        alert('添加映射失败！');
+      }
+    }
+
+    async function deleteMapping(source) {
+      if (!confirm('确定要删除此自定义映射并恢复为系统默认吗？')) return;
+      
+      delete customMappings[source];
+
+      const res = await apiFetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customModelMap: customMappings })
+      });
+
+      if (res.ok) {
+        loadSettings();
+      } else {
+        alert('删除映射失败！');
+      }
+    }
+  </script>
+</body>
+</html>`;
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// 3. KV Error UI Page
+function handleKVError(request) {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KV 绑定异常 - Workers AI to API</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .error-card {
+      background-color: #1e293b;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      color: #ef4444;
+      margin-bottom: 16px;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    .code-block {
+      background-color: rgba(0,0,0,0.3);
+      padding: 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #a78bfa;
+      text-align: left;
+      margin-bottom: 24px;
+      border: 1px solid rgba(255,255,255,0.05);
+      line-height: 1.8;
+    }
+    .btn {
+      display: inline-block;
+      background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+      color: white;
+      text-decoration: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 14px;
+      transition: opacity 0.2s;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+  </style>
+</head>
+<body>
+  <div class="error-card">
+    <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+    <h1>KV 命名空间未绑定</h1>
+    <p>系统检测到您未在 Cloudflare 平台中为该项目绑定 KV 命名空间，或者绑定的变量名称不为 <strong>KV</strong>。这会导致数据无法保存，系统无法正常运行。</p>
+    
+    <div class="code-block">
+      <strong>解决方案：</strong><br>
+      1. 进入您的 Cloudflare Workers/Pages 仪表盘。<br>
+      2. 导航至 Settings -> Functions (或 Settings -> Variables) -> KV namespace bindings。<br>
+      3. 添加绑定，将【变量名称 (Variable name)】设置为: <strong>KV</strong><br>
+      4. 保存并重新部署项目即可。
+    </div>
+    
+    <a href="https://developers.cloudflare.com/kv/learning/kv-bindings/" target="_blank" class="btn">查看官方绑定教程</a>
+  </div>
+</body>
+</html>`;
+
+  const url = new URL(request.url);
+  if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/api/')) {
+    return new Response(JSON.stringify({
+      error: {
+        message: "Cloudflare KV namespace binding 'KV' is missing. Please bind a KV namespace to 'KV' in your Worker/Pages settings.",
+        type: "server_error"
+      }
+    }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' } });
+  }
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}
+
+// 4. Password Error UI Page
+function handlePasswordError(request) {
+  const html = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>管理员密码未配置 - Workers AI to API</title>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #0f172a;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .error-card {
+      background-color: #1e293b;
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 16px;
+      padding: 40px;
+      max-width: 500px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    }
+    h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 24px;
+      color: #ef4444;
+      margin-bottom: 16px;
+    }
+    p {
+      color: #94a3b8;
+      font-size: 15px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+    .code-block {
+      background-color: rgba(0,0,0,0.3);
+      padding: 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 13px;
+      color: #a78bfa;
+      text-align: left;
+      margin-bottom: 24px;
+      border: 1px solid rgba(255,255,255,0.05);
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+  <div class="error-card">
+    <div style="font-size: 48px; margin-bottom: 16px;">🔑</div>
+    <h1>管理员密码未配置</h1>
+    <p>系统检测到您未在 Cloudflare 平台中为该项目配置 <strong>ADMIN_PASSWORD</strong> 环境变量。为了您的接口和管理后台安全，系统已拦截所有访问，直到密码配置完成。</p>
+    
+    <div class="code-block">
+      <strong>解决方案：</strong><br>
+      1. 进入您的 Cloudflare Workers/Pages 仪表盘。<br>
+      2. 导航至 Settings -> Variables (或 Settings -> Environment Variables)。<br>
+      3. 点击【Add variable】，将【Variable name】设置为: <strong>ADMIN_PASSWORD</strong><br>
+      4. 输入您的管理员登录密码作为其值，保存并部署即可。
+    </div>
+  </div>
+</body>
+</html>`;
+
+  const url = new URL(request.url);
+  if (url.pathname.startsWith('/v1/') || url.pathname.startsWith('/api/')) {
+    return new Response(JSON.stringify({
+      error: {
+        message: "ADMIN_PASSWORD environment variable is missing. Please add the ADMIN_PASSWORD variable to your Worker/Pages settings.",
+        type: "server_error"
+      }
+    }), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' } });
+  }
+
+  return new Response(html, {
+    headers: { 'Content-Type': 'text/html; charset=utf-8' }
+  });
+}

@@ -1,0 +1,11 @@
+name = "workers-ai2api"
+main = "_worker.js"
+compatibility_date = "2026-06-30"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "placeholder_id" # 部署时请在此处填入您的生产环境 KV Namespace ID
+
+[vars]
+# ADMIN_PASSWORD = "your_admin_password" # 可选：管理员面板密码，如果不设置则可在页面首次加载时配置
+# CUSTOM_MODEL_MAP = "{}" # 可选：自定义模型映射的 JSON 字符串
