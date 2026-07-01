@@ -2,6 +2,12 @@
 
 把 Cloudflare Workers AI 变成 OpenAI 兼容接口，自带可视化管理面板。部署在 Cloudflare Workers / Pages 上。
 
+#### 主页预览
+![公开首页](img/1.png)
+
+#### 管理页面
+![管理页面](img/2.png)
+
 ## 🚀 它能干什么
 
 - OpenAI 兼容：把 CF 免费 AI 模型转成 `/v1/chat/completions` 格式，Cursor、LobeChat、NextChat 等客户端直接接入
@@ -56,3 +62,7 @@ id = "你的KV命名空间ID"
 | `bge-m3` | `@cf/baai/bge-m3` |
 
 直接传 `@cf/xxx` 开头的模型名会跳过映射直接透传。
+
+## 🤝 致谢
+
+特别感谢 **[Cloudflare](https://www.cloudflare.com/)** 提供强大且免费的 Workers AI 服务和 Pages 托管平台！
