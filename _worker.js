@@ -270,6 +270,69 @@ async function setCachedSummary(env, summaryData) {
 	await env.KV.put('cache_usage_summary', JSON.stringify(data));
 }
 
+async function refreshAccountsUsage(env, accounts, limit = 20) {
+	const cachedDetailsRaw = await env.KV.get('cache_usage_details');
+	let cacheMap = {};
+	if (cachedDetailsRaw) {
+		try {
+			cacheMap = JSON.parse(cachedDetailsRaw) || {};
+		} catch (e) {
+			cacheMap = {};
+		}
+	}
+
+	// 按最后更新的时间戳升序排序（时间戳为 0 或不存在的最先更新）
+	const sortedAccounts = [...accounts].sort((a, b) => {
+		const tA = cacheMap[a.id]?.timestamp || 0;
+		const tB = cacheMap[b.id]?.timestamp || 0;
+		return tA - tB;
+	});
+
+	const accountsToUpdate = sortedAccounts.slice(0, limit);
+
+	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+	sevenDaysAgo.setUTCHours(0, 0, 0, 0);
+	const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
+
+	const todayUTC = new Date();
+	todayUTC.setUTCHours(0, 0, 0, 0);
+	const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
+
+	const promises = accountsToUpdate.map(async (account) => {
+		try {
+			const [todayGroups, historyGroups] = await Promise.all([
+				queryGraphQL(account.accountId, account.apiToken, startToday),
+				queryGraphQL(account.accountId, account.apiToken, startSevenDays)
+			]);
+			const todayParsed = processAnalytics(todayGroups);
+			const historyParsed = processAnalytics(historyGroups);
+
+			cacheMap[account.id] = {
+				status: 'active',
+				error: null,
+				usageToday: todayParsed.todayTotalNeurons,
+				modelsToday: todayParsed.todayModels,
+				history: historyParsed.history,
+				timestamp: Date.now()
+			};
+		} catch (e) {
+			console.error(`Error querying GraphQL for ${account.name}:`, e);
+			cacheMap[account.id] = {
+				status: 'error',
+				error: e.message,
+				usageToday: cacheMap[account.id]?.usageToday || 0,
+				modelsToday: cacheMap[account.id]?.modelsToday || [],
+				history: cacheMap[account.id]?.history || [],
+				timestamp: Date.now() // 即使出错也更新时间戳，以便其他账号轮转刷新
+			};
+		}
+	});
+
+	await Promise.all(promises);
+	await env.KV.put('cache_usage_details', JSON.stringify(cacheMap));
+	return cacheMap;
+}
+
 // ----------------------------------------------------
 // Cloudflare GraphQL 用量分析查询
 // ----------------------------------------------------
@@ -1404,29 +1467,18 @@ async function handleDashboardApi(request, env, ctx) {
 			}), { headers: { 'Content-Type': 'application/json' } });
 		}
 
-		const today = new Date();
-		today.setUTCHours(0, 0, 0, 0);
-		const startToday = today.toISOString().split('.')[0] + 'Z';
+		// 刷新最老数据的20个账号
+		const cacheMap = await refreshAccountsUsage(env, accounts, 20);
 
-		const promises = accounts.map(async (account) => {
-			try {
-				const groups = await queryGraphQL(account.accountId, account.apiToken, startToday);
-				let accountNeurons = 0;
-				const todayStr = new Date().toISOString().split('T')[0];
-				for (const g of groups) {
-					if (g.dimensions.date === todayStr) {
-						accountNeurons += g.sum.totalNeurons || 0;
-					}
-				}
-				return accountNeurons;
-			} catch (e) {
-				console.error(`Failed to get usage summary for ${account.name}:`, e);
-				return 0;
+		// 计算总量
+		let totalNeuronsToday = 0;
+		accounts.forEach(account => {
+			const cachedItem = cacheMap[account.id];
+			if (cachedItem && cachedItem.usageToday) {
+				totalNeuronsToday += cachedItem.usageToday;
 			}
 		});
 
-		const results = await Promise.all(promises);
-		const totalNeuronsToday = results.reduce((a, b) => a + b, 0);
 		const totalLimit = accounts.length * 10000;
 		const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
 
@@ -1541,53 +1593,24 @@ async function handleDashboardApi(request, env, ctx) {
 			return new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } });
 		}
 
-		const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-		sevenDaysAgo.setUTCHours(0, 0, 0, 0);
-		const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
+		// 刷新最老数据的20个账号
+		const cacheMap = await refreshAccountsUsage(env, accounts, 20);
 
-		// 单独从 UTC 零点开始查今天的数据，避免 7 天数据量太大时
-		// 触发 GraphQL 最多 1000 条的限制，导致今天的数据被截断不全。
-		const todayUTC = new Date();
-		todayUTC.setUTCHours(0, 0, 0, 0);
-		const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
-
-		const promises = accounts.map(async (account) => {
-			try {
-				// 两个查询并行执行：只查今天的用于显示准确当前用量，
-				// 查 7 天的用于画历史趋势图。
-				const [todayGroups, historyGroups] = await Promise.all([
-					queryGraphQL(account.accountId, account.apiToken, startToday),
-					queryGraphQL(account.accountId, account.apiToken, startSevenDays)
-				]);
-				// 今天的数据用「只查今天」的结果（准确，不会被截断）
-				const todayParsed = processAnalytics(todayGroups);
-				// 历史趋势图用「查 7 天」的结果
-				const historyParsed = processAnalytics(historyGroups);
-				return {
-					id: account.id,
-					name: account.name,
-					accountId: account.accountId,
-					status: 'active',
-					usageToday: todayParsed.todayTotalNeurons,
-					modelsToday: todayParsed.todayModels,
-					history: historyParsed.history
-				};
-			} catch (e) {
-				console.error(`Detailed usage fetch error for ${account.name}:`, e);
-				return {
-					id: account.id,
-					name: account.name,
-					accountId: account.accountId,
-					status: 'error',
-					error: e.message,
-					usageToday: 0,
-					modelsToday: [],
-					history: []
-				};
-			}
+		// 构建完整结果列表，若没有缓存数据则标为 pending
+		const results = accounts.map(account => {
+			const cached = cacheMap[account.id];
+			return {
+				id: account.id,
+				name: account.name,
+				accountId: account.accountId,
+				status: cached ? cached.status : 'pending',
+				error: cached ? cached.error : undefined,
+				usageToday: cached ? cached.usageToday : 0,
+				modelsToday: cached ? cached.modelsToday : [],
+				history: cached ? cached.history : []
+			};
 		});
 
-		const results = await Promise.all(promises);
 		return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
 	}
 
@@ -3038,6 +3061,28 @@ function handleAdminPage(request, env, ctx) {
 			transform: translateY(-1px);
 		}
 
+		.btn:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+			transform: none !important;
+			box-shadow: none !important;
+		}
+
+		@keyframes spinner-border {
+			to { transform: rotate(360deg); }
+		}
+
+		.spinner {
+			display: inline-block;
+			width: 12px;
+			height: 12px;
+			vertical-align: text-bottom;
+			border: 2px solid currentColor;
+			border-right-color: transparent;
+			border-radius: 50%;
+			animation: spinner-border .75s linear infinite;
+		}
+
 		/* Tables */
 		table {
 			width: 100%;
@@ -3088,6 +3133,7 @@ function handleAdminPage(request, env, ctx) {
 		.badge-success { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
 		.badge-warning { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 		.badge-danger { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; }
+		.badge-info { background-color: rgba(59, 130, 246, 0.15); color: #3b82f6; }
 
 		/* Charts */
 		.charts-grid {
@@ -3443,7 +3489,7 @@ function handleAdminPage(request, env, ctx) {
 					<div class="section-card" style="margin-top: 24px;">
 						<div class="section-header">
 							<div class="section-title">账号用量明细</div>
-							<button class="btn btn-secondary" onclick="loadUsageDetails()">刷新用量</button>
+							<button class="btn btn-secondary" id="btn-refresh-usage" onclick="loadUsageDetails()">刷新用量</button>
 						</div>
 						<div id="accounts-usage-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
 							<!-- Individual account progress item -->
@@ -3776,6 +3822,13 @@ function handleAdminPage(request, env, ctx) {
 		}
 
 		async function loadUsageDetails() {
+			const btn = document.getElementById('btn-refresh-usage');
+			let originalBtnText = '';
+			if (btn) {
+				originalBtnText = btn.innerHTML;
+				btn.disabled = true;
+				btn.innerHTML = '<span class="spinner"></span> 刷新中...';
+			}
 			try {
 				const res = await apiFetch('/api/accounts/usage');
 				const data = await res.json();
@@ -3798,8 +3851,8 @@ function handleAdminPage(request, env, ctx) {
 
 					// Percentage formatted to 2 decimal places
 					const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
-					const warningClass = account.status === 'error' ? 'badge-danger' : (percentage >= 90 ? 'badge-warning' : 'badge-success');
-					const statusText = account.status === 'error' ? '连接异常' : (percentage >= 100 ? '用尽 (10k)' : '正常运行');
+					const warningClass = account.status === 'error' ? 'badge-danger' : (account.status === 'pending' ? 'badge-info' : (percentage >= 90 ? 'badge-warning' : 'badge-success'));
+					const statusText = account.status === 'error' ? '连接异常' : (account.status === 'pending' ? '待刷新' : (percentage >= 100 ? '用尽 (10k)' : '正常运行'));
 					
 					// Usage rounded up (Math.ceil)
 					const roundedUsage = Math.ceil(account.usageToday);
@@ -3866,6 +3919,11 @@ function handleAdminPage(request, env, ctx) {
 
 			} catch (e) {
 				console.error(e);
+			} finally {
+				if (btn) {
+					btn.disabled = false;
+					btn.innerHTML = originalBtnText;
+				}
 			}
 		}
 
