@@ -3731,6 +3731,149 @@ function handleAdminPage(request, env, ctx) {
 			}, 3000);
 		}
 
+		function renderUsageDetails(data) {
+			let totalUsageToday = 0;
+			let totalLimit = data.length * 10000;
+			let historyData = {};
+			let modelsToday = {};
+
+			const usageList = document.getElementById('accounts-usage-list');
+
+			// 记录刷新前已有卡片的最后更新时间戳
+			const previousTimestamps = new Map();
+			usageList.querySelectorAll('.section-card').forEach(card => {
+				const id = card.dataset.id;
+				const ts = parseInt(card.dataset.lastUpdated || '0', 10);
+				if (id) previousTimestamps.set(id, ts);
+			});
+
+			usageList.innerHTML = '';
+
+			if (data.length === 0) {
+				usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px; width: 100%;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
+				return;
+			}
+
+			data.forEach(account => {
+				totalUsageToday += account.usageToday;
+
+				// Percentage formatted to 2 decimal places
+				const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
+				const warningClass = account.status === 'error' ? 'badge-danger' : (account.status === 'pending' ? 'badge-info' : (percentage >= 90 ? 'badge-warning' : 'badge-success'));
+				const statusText = account.status === 'error' ? '连接异常' : (account.status === 'pending' ? '待刷新' : (percentage >= 100 ? '用尽 (10k)' : '正常运行'));
+				
+				// Usage rounded up (Math.ceil)
+				const roundedUsage = Math.ceil(account.usageToday);
+				
+				const item = document.createElement('div');
+				const isRefreshed = previousTimestamps.has(account.id) && previousTimestamps.get(account.id) !== account.lastUpdated;
+				item.className = 'section-card' + (isRefreshed ? ' card-update-flash' : '');
+				item.dataset.id = account.id;
+				item.dataset.lastUpdated = account.lastUpdated || 0;
+				item.style.padding = '20px';
+				item.style.backgroundColor = 'rgba(255,255,255,0.01)';
+				item.innerHTML = \`
+					<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; gap: 12px;">
+						<div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px;">
+							<strong style="font-size:15px; font-weight:600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;" title="\${account.name}">\${account.name}</strong>
+							<span style="font-size:12px; color: var(--text-muted); font-family: monospace; white-space: nowrap; flex-shrink: 0;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
+						</div>
+						<span class="badge \${warningClass}" style="flex-shrink: 0;">\${statusText}</span>
+					</div>
+					<div class="progress-container">
+						<div class="progress-bar" style="width: \${percentage}%;"></div>
+					</div>
+					<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
+						<span>今日已用: \${roundedUsage.toLocaleString()} / 10,000 Neurons</span>
+						<span>\${percentage.toFixed(2)}%</span>
+					</div>
+					\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
+				\`;
+				usageList.appendChild(item);
+
+				if (account.history) {
+					account.history.forEach(h => {
+						historyData[h.date] = (historyData[h.date] || 0) + h.neurons;
+					});
+				}
+
+				if (account.modelsToday) {
+					account.modelsToday.forEach(m => {
+						modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+					});
+				}
+			});
+
+			// Top stats formatting (Usage rounded up, Percentage 2 decimals)
+			const roundedTotalUsageToday = Math.ceil(totalUsageToday);
+			document.getElementById('stat-total-neurons').innerText = roundedTotalUsageToday.toLocaleString();
+			document.getElementById('stat-accounts-count').innerText = data.length;
+			
+			const overallPercentage = totalLimit > 0 ? Math.min(100, Number(((totalUsageToday / totalLimit) * 100).toFixed(2))) : 0;
+			document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
+			document.getElementById('stat-neurons-desc').innerText = \`\${roundedTotalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage.toFixed(2)}%)\`;
+			
+			const costSaved = (totalUsageToday / 1000) * 0.011;
+			document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
+
+			const dates = Object.keys(historyData).sort();
+			const neuronsData = dates.map(d => historyData[d]);
+			renderHistoryChart(dates, neuronsData);
+
+			const models = Object.keys(modelsToday);
+			const modelsNeurons = models.map(m => modelsToday[m]);
+			renderModelsChart(models, modelsNeurons);
+		}
+
+		async function loadUsageDetails() {
+			// 优先从浏览器 localStorage 读取并渲染上次缓存的数据
+			const cachedDataRaw = localStorage.getItem('cache_accounts_usage');
+			if (cachedDataRaw) {
+				try {
+					const cachedData = JSON.parse(cachedDataRaw);
+					renderUsageDetails(cachedData);
+				} catch (e) {
+					console.error('Error parsing cached usage details:', e);
+				}
+			}
+			const cachedKeysCount = localStorage.getItem('cache_keys_count');
+			if (cachedKeysCount) {
+				document.getElementById('stat-keys-count').innerText = cachedKeysCount;
+			}
+
+			const btn = document.getElementById('btn-refresh-usage');
+			let originalBtnText = '';
+			if (btn) {
+				originalBtnText = btn.innerHTML;
+				btn.disabled = true;
+				btn.innerHTML = '<span class="spinner"></span> 刷新中...';
+			}
+			try {
+				const res = await apiFetch('/api/accounts/usage');
+				const data = await res.json();
+				
+				// 渲染最新的实时数据
+				renderUsageDetails(data);
+				
+				// 保存/更新本地缓存
+				localStorage.setItem('cache_accounts_usage', JSON.stringify(data));
+
+				// 刷新并缓存 API 密钥数
+				const keysRes = await apiFetch('/api/keys');
+				const keys = await keysRes.json();
+				document.getElementById('stat-keys-count').innerText = keys.length;
+				localStorage.setItem('cache_keys_count', keys.length);
+
+			} catch (e) {
+				console.error(e);
+			} finally {
+				if (btn) {
+					btn.disabled = false;
+					btn.innerHTML = originalBtnText;
+				}
+			}
+		}
+
 		function initTheme() {
 			const savedTheme = localStorage.getItem('theme');
 			if (savedTheme) {
@@ -3837,123 +3980,6 @@ function handleAdminPage(request, env, ctx) {
 			return res;
 		}
 
-		async function loadUsageDetails() {
-			const btn = document.getElementById('btn-refresh-usage');
-			let originalBtnText = '';
-			if (btn) {
-				originalBtnText = btn.innerHTML;
-				btn.disabled = true;
-				btn.innerHTML = '<span class="spinner"></span> 刷新中...';
-			}
-			try {
-				const res = await apiFetch('/api/accounts/usage');
-				const data = await res.json();
-				
-				let totalUsageToday = 0;
-				let totalLimit = data.length * 10000;
-				let historyData = {};
-				let modelsToday = {};
-
-				const usageList = document.getElementById('accounts-usage-list');
-
-				// 记录刷新前已有卡片的最后更新时间戳
-				const previousTimestamps = new Map();
-				usageList.querySelectorAll('.section-card').forEach(card => {
-					const id = card.dataset.id;
-					const ts = parseInt(card.dataset.lastUpdated || '0', 10);
-					if (id) previousTimestamps.set(id, ts);
-				});
-
-				usageList.innerHTML = '';
-
-				if (data.length === 0) {
-					usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px; width: 100%;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
-					return;
-				}
-
-				data.forEach(account => {
-					totalUsageToday += account.usageToday;
-
-					// Percentage formatted to 2 decimal places
-					const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
-					const warningClass = account.status === 'error' ? 'badge-danger' : (account.status === 'pending' ? 'badge-info' : (percentage >= 90 ? 'badge-warning' : 'badge-success'));
-					const statusText = account.status === 'error' ? '连接异常' : (account.status === 'pending' ? '待刷新' : (percentage >= 100 ? '用尽 (10k)' : '正常运行'));
-					
-					// Usage rounded up (Math.ceil)
-					const roundedUsage = Math.ceil(account.usageToday);
-					
-					const item = document.createElement('div');
-					const isRefreshed = previousTimestamps.has(account.id) && previousTimestamps.get(account.id) !== account.lastUpdated;
-					item.className = 'section-card' + (isRefreshed ? ' card-update-flash' : '');
-					item.dataset.id = account.id;
-					item.dataset.lastUpdated = account.lastUpdated || 0;
-					item.style.padding = '20px';
-					item.style.backgroundColor = 'rgba(255,255,255,0.01)';
-					item.innerHTML = \`
-						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; gap: 12px;">
-							<div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px;">
-								<strong style="font-size:15px; font-weight:600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;" title="\${account.name}">\${account.name}</strong>
-								<span style="font-size:12px; color: var(--text-muted); font-family: monospace; white-space: nowrap; flex-shrink: 0;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
-							</div>
-							<span class="badge \${warningClass}" style="flex-shrink: 0;">\${statusText}</span>
-						</div>
-						<div class="progress-container">
-							<div class="progress-bar" style="width: \${percentage}%;"></div>
-						</div>
-						<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
-							<span>今日已用: \${roundedUsage.toLocaleString()} / 10,000 Neurons</span>
-							<span>\${percentage.toFixed(2)}%</span>
-						</div>
-						\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
-					\`;
-					usageList.appendChild(item);
-
-					if (account.history) {
-						account.history.forEach(h => {
-							historyData[h.date] = (historyData[h.date] || 0) + h.neurons;
-						});
-					}
-
-					if (account.modelsToday) {
-						account.modelsToday.forEach(m => {
-							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
-						});
-					}
-				});
-
-				// Top stats formatting (Usage rounded up, Percentage 2 decimals)
-				const roundedTotalUsageToday = Math.ceil(totalUsageToday);
-				document.getElementById('stat-total-neurons').innerText = roundedTotalUsageToday.toLocaleString();
-				document.getElementById('stat-accounts-count').innerText = data.length;
-				
-				const overallPercentage = totalLimit > 0 ? Math.min(100, Number(((totalUsageToday / totalLimit) * 100).toFixed(2))) : 0;
-				document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
-				document.getElementById('stat-neurons-desc').innerText = \`\${roundedTotalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage.toFixed(2)}%)\`;
-				
-				const costSaved = (totalUsageToday / 1000) * 0.011;
-				document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
-
-				const keysRes = await apiFetch('/api/keys');
-				const keys = await keysRes.json();
-				document.getElementById('stat-keys-count').innerText = keys.length;
-
-				const dates = Object.keys(historyData).sort();
-				const neuronsData = dates.map(d => historyData[d]);
-				renderHistoryChart(dates, neuronsData);
-
-				const models = Object.keys(modelsToday);
-				const modelsNeurons = models.map(m => modelsToday[m]);
-				renderModelsChart(models, modelsNeurons);
-
-			} catch (e) {
-				console.error(e);
-			} finally {
-				if (btn) {
-					btn.disabled = false;
-					btn.innerHTML = originalBtnText;
-				}
-			}
-		}
 
 		function renderHistoryChart(labels, data) {
 			if (historyChart) historyChart.destroy();
