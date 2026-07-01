@@ -1047,9 +1047,9 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 						// 文本内容 delta
 						if (!streamStarted) {
 							sendMessageStart(controller);
+							contentBlockIndex++;
 							sendContentBlockStart(controller, 'text');
 							streamStarted = true;
-							contentBlockIndex++;
 							blockStopSent = false;
 						}
 
@@ -1062,8 +1062,8 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 							currentToolArgs = '';
 
 							// 开始新的 text block
-							sendContentBlockStart(controller, 'text');
 							contentBlockIndex++;
+							sendContentBlockStart(controller, 'text');
 							blockStopSent = false;
 						}
 
