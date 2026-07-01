@@ -1044,47 +1044,133 @@ async function handleLandingPage(request, env, ctx) {
 	}
 
 	const html = `<!DOCTYPE html>
-<html lang="zh-CN">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Workers AI to API - Cloudflare Workers AI Proxy</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 	<style>
 		:root {
-			--bg-color: #0f172a;
-			--card-bg: #1e293b;
-			--border-color: rgba(255, 255, 255, 0.06);
-			--text-main: #f1f5f9;
+			--bg-color: #0b0f19;
+			--card-bg: rgba(30, 41, 59, 0.45);
+			--border-color: rgba(255, 255, 255, 0.08);
+			--text-main: #f8fafc;
 			--text-muted: #94a3b8;
-			--primary-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
-			--accent-color: #a78bfa;
-			--input-bg: rgba(0, 0, 0, 0.2);
+			--primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+			--accent-color: #a855f7;
+			--input-bg: rgba(15, 23, 42, 0.6);
 			--input-border: rgba(255, 255, 255, 0.1);
-			--input-text: #f1f5f9;
-			--btn-secondary-bg: rgba(255, 255, 255, 0.08);
+			--input-text: #f8fafc;
+			--btn-secondary-bg: rgba(255, 255, 255, 0.06);
 			--btn-secondary-hover: rgba(255, 255, 255, 0.12);
-			--btn-secondary-text: #f1f5f9;
-			--modal-overlay-bg: rgba(0, 0, 0, 0.7);
+			--btn-secondary-text: #f8fafc;
+			--modal-overlay-bg: rgba(8, 10, 18, 0.6);
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+			--orb-1-color: rgba(99, 102, 241, 0.15);
+			--orb-2-color: rgba(236, 72, 153, 0.12);
 		}
 
 		:root[data-theme="light"] {
-			--bg-color: #f8fafc;
-			--card-bg: #ffffff;
-			--border-color: rgba(0, 0, 0, 0.08);
+			--bg-color: #f1f5f9;
+			--card-bg: rgba(255, 255, 255, 0.7);
+			--border-color: rgba(0, 0, 0, 0.06);
 			--text-main: #0f172a;
 			--text-muted: #64748b;
-			--primary-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
-			--accent-color: #7c3aed;
-			--input-bg: #f1f5f9;
-			--input-border: rgba(0, 0, 0, 0.1);
+			--primary-gradient: linear-gradient(135deg, #4f46e5 0%, #9333ea 50%, #db2777 100%);
+			--accent-color: #9333ea;
+			--input-bg: rgba(241, 245, 249, 0.8);
+			--input-border: rgba(0, 0, 0, 0.08);
 			--input-text: #0f172a;
-			--btn-secondary-bg: #e2e8f0;
-			--btn-secondary-hover: #cbd5e1;
+			--btn-secondary-bg: rgba(0, 0, 0, 0.04);
+			--btn-secondary-hover: rgba(0, 0, 0, 0.08);
 			--btn-secondary-text: #0f172a;
-			--modal-overlay-bg: rgba(0, 0, 0, 0.5);
+			--modal-overlay-bg: rgba(241, 245, 249, 0.5);
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+			--orb-1-color: rgba(99, 102, 241, 0.08);
+			--orb-2-color: rgba(236, 72, 153, 0.06);
+		}
+
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
+		body {
+			font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+			background-color: var(--bg-color);
+			color: var(--text-main);
+			min-height: 100vh;
+			display: flex;
+			flex-direction: column;
+			justify-content: center;
+			align-items: center;
+			padding: 20px;
+			overflow-x: hidden;
+			position: relative;
+		}
+
+		h1, h2, h3 {
+			font-family: 'Outfit', sans-serif;
+		}
+
+		/* Utility Hidden Class */
+		.hidden {
+			display: none !important;
+		}
+
+		/* Dynamic Background Orbs */
+		.bg-orbs-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: -1;
+			overflow: hidden;
+			pointer-events: none;
+		}
+
+		.bg-orb {
+			position: absolute;
+			border-radius: 50%;
+			filter: blur(100px);
+			animation: float 25s infinite alternate ease-in-out;
+		}
+
+		.bg-orb-1 {
+			top: -10%;
+			left: -10%;
+			width: 50vw;
+			height: 50vw;
+			background: var(--orb-1-color);
+			animation-duration: 20s;
+		}
+
+		.bg-orb-2 {
+			bottom: -10%;
+			right: -10%;
+			width: 60vw;
+			height: 60vw;
+			background: var(--orb-2-color);
+			animation-duration: 30s;
+			animation-delay: -5s;
+		}
+
+		@keyframes float {
+			0% {
+				transform: translate(0, 0) scale(1);
+			}
+			50% {
+				transform: translate(5%, 10%) scale(1.1);
+			}
+			100% {
+				transform: translate(-5%, -5%) scale(0.9);
+			}
 		}
 
 		.action-btn-group {
@@ -1092,7 +1178,7 @@ async function handleLandingPage(request, env, ctx) {
 			top: 20px;
 			right: 20px;
 			display: flex;
-			flex-direction: column;
+			flex-direction: row;
 			gap: 12px;
 			z-index: 1000;
 		}
@@ -1101,22 +1187,240 @@ async function handleLandingPage(request, env, ctx) {
 			background-color: var(--card-bg);
 			border: 1px solid var(--border-color);
 			color: var(--text-main);
-			width: 40px;
-			height: 40px;
-			border-radius: 50%;
+			width: 44px;
+			height: 44px;
+			border-radius: 12px;
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			cursor: pointer;
-			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-			transition: all 0.2s;
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 			z-index: 1000;
 			outline: none;
 		}
 		
 		.floating-btn:hover {
-			transform: scale(1.05);
+			transform: translateY(-2px);
+			border-color: rgba(168, 85, 247, 0.4);
+			box-shadow: 0 8px 20px rgba(168, 85, 247, 0.15);
+		}
+
+		.login-container {
+			max-width: 440px;
+			width: 100%;
+			display: flex;
+			flex-direction: column;
+			gap: 28px;
+			z-index: 10;
+		}
+
+		.login-header {
+			display: flex;
+			flex-direction: row;
+			align-items: center;
+			justify-content: center;
+			gap: 16px;
+			margin-bottom: 8px;
+		}
+
+		.logo-icon {
+			width: 46px;
+			height: 46px;
+			border-radius: 12px;
+			background: var(--primary-gradient);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-weight: bold;
+			color: white;
+			font-size: 22px;
+			font-family: 'Outfit', sans-serif;
+			box-shadow: 0 4px 14px rgba(168, 85, 247, 0.25);
+		}
+
+		.logo-text {
+			font-size: 24px;
+			font-weight: 700;
+			letter-spacing: -0.5px;
+			background: var(--primary-gradient);
+			-webkit-background-clip: text;
+			-webkit-text-fill-color: transparent;
+		}
+
+		.stat-card {
+			background-color: var(--card-bg);
+			border: 1px solid var(--border-color);
+			border-radius: 18px;
+			padding: 26px;
+			display: flex;
+			flex-direction: column;
+			gap: 14px;
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
+		}
+
+		.stat-card:hover {
+			transform: translateY(-4px);
+			border-color: rgba(168, 85, 247, 0.3);
+			box-shadow: 0 12px 30px rgba(168, 85, 247, 0.1);
+		}
+
+		.stat-title {
+			font-size: 14px;
+			color: var(--text-muted);
+			font-weight: 500;
+		}
+
+		.stat-value {
+			font-size: 36px;
+			font-weight: 700;
+			font-family: 'Outfit', sans-serif;
+		}
+
+		.progress-container {
+			width: 100%;
+			height: 8px;
+			background-color: rgba(255, 255, 255, 0.06);
+			border-radius: 4px;
+			overflow: hidden;
+			position: relative;
+		}
+
+		:root[data-theme="light"] .progress-container {
+			background-color: rgba(0, 0, 0, 0.05);
+		}
+
+		.progress-bar {
+			height: 100%;
+			background: var(--primary-gradient);
+			border-radius: 4px;
+			width: 0%;
+			transition: width 1.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+			position: relative;
+			overflow: hidden;
+		}
+
+		.progress-bar::after {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background: linear-gradient(
+				90deg,
+				rgba(255, 255, 255, 0) 0%,
+				rgba(255, 255, 255, 0.2) 50%,
+				rgba(255, 255, 255, 0) 100%
+			);
+			animation: progress-shimmer 2s infinite linear;
+			background-size: 200% 100%;
+		}
+
+		@keyframes progress-shimmer {
+			0% { background-position: -200% 0; }
+			100% { background-position: 200% 0; }
+		}
+
+		.section-card {
+			background-color: var(--card-bg);
+			border: 1px solid var(--border-color);
+			border-radius: 18px;
+			padding: 28px;
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			display: flex;
+			flex-direction: column;
+			gap: 20px;
+		}
+
+		.section-title {
+			font-size: 18px;
+			font-weight: 600;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+		}
+
+		.form-group {
+			display: flex;
+			flex-direction: column;
+			gap: 8px;
+		}
+
+		.form-group label {
+			font-size: 13px;
+			font-weight: 500;
+			color: var(--text-muted);
+		}
+
+		input {
+			background-color: var(--input-bg);
+			border: 1px solid var(--input-border);
+			color: var(--input-text);
+			padding: 12px 16px;
+			border-radius: 10px;
+			outline: none;
+			font-size: 14px;
+			transition: all 0.3s ease;
+			backdrop-filter: blur(10px);
+		}
+
+		input:focus {
 			border-color: var(--accent-color);
+			box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2);
+			background-color: rgba(15, 23, 42, 0.8);
+		}
+
+		:root[data-theme="light"] input:focus {
+			background-color: rgba(255, 255, 255, 0.95);
+		}
+
+		.btn {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			padding: 12px 20px;
+			border-radius: 10px;
+			font-weight: 600;
+			font-size: 14px;
+			cursor: pointer;
+			border: none;
+			transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+			text-decoration: none;
+		}
+
+		.btn-primary {
+			background: var(--primary-gradient);
+			color: white;
+			box-shadow: 0 4px 14px rgba(168, 85, 247, 0.3);
+		}
+
+		.btn-primary:hover {
+			transform: translateY(-2px);
+			box-shadow: 0 6px 20px rgba(168, 85, 247, 0.5);
+			opacity: 0.95;
+		}
+
+		.btn-primary:active {
+			transform: translateY(0);
+		}
+
+		.btn-secondary {
+			background-color: var(--btn-secondary-bg);
+			color: var(--btn-secondary-text);
+			border: 1px solid var(--border-color);
+		}
+
+		.btn-secondary:hover {
+			background-color: var(--btn-secondary-hover);
+			transform: translateY(-1px);
 		}
 
 		/* Modal Styling */
@@ -1127,38 +1431,43 @@ async function handleLandingPage(request, env, ctx) {
 			right: 0;
 			bottom: 0;
 			background-color: var(--modal-overlay-bg);
-			backdrop-filter: blur(5px);
+			backdrop-filter: blur(0px);
+			-webkit-backdrop-filter: blur(0px);
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			z-index: 1000;
 			opacity: 0;
 			pointer-events: none;
-			transition: opacity 0.25s ease-in-out;
+			transition: opacity 0.3s ease, backdrop-filter 0.3s ease, -webkit-backdrop-filter 0.3s ease;
 		}
 
 		.modal-overlay.active {
 			opacity: 1;
 			pointer-events: auto;
+			backdrop-filter: blur(8px);
+			-webkit-backdrop-filter: blur(8px);
 		}
 
 		.modal-card {
 			background-color: var(--card-bg);
 			border: 1px solid var(--border-color);
-			border-radius: 16px;
+			border-radius: 20px;
 			width: 100%;
 			max-width: 400px;
-			padding: 28px;
-			box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+			padding: 32px;
+			box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
 			display: flex;
 			flex-direction: column;
-			gap: 16px;
-			transform: scale(0.95);
-			transition: transform 0.25s ease-in-out;
+			gap: 20px;
+			transform: scale(0.9) translateY(20px);
+			transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s;
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
 		}
 
 		.modal-overlay.active .modal-card {
-			transform: scale(1);
+			transform: scale(1) translateY(0);
 		}
 
 		.modal-header {
@@ -1191,200 +1500,89 @@ async function handleLandingPage(request, env, ctx) {
 			color: var(--text-main);
 		}
 
-		/* Theme transitions */
-		body, .stat-card, .floating-btn, input, .btn-secondary, .modal-card {
-			transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease, background 0.25s ease, transform 0.25s ease;
-		}
-
-		* {
-			box-sizing: border-box;
-			margin: 0;
-			padding: 0;
-		}
-
-		body {
-			font-family: 'Inter', sans-serif;
-			background-color: var(--bg-color);
-			color: var(--text-main);
-			min-height: 100vh;
+		/* Toast Notification */
+		.toast-container {
+			position: fixed;
+			top: 24px;
+			right: 24px;
 			display: flex;
 			flex-direction: column;
-			justify-content: center;
-			align-items: center;
-			padding: 20px;
+			gap: 10px;
+			z-index: 9999;
+			pointer-events: none;
 		}
 
-		h1, h2, h3 {
-			font-family: 'Outfit', sans-serif;
-		}
-
-		.login-container {
-			max-width: 440px;
-			width: 100%;
-			display: flex;
-			flex-direction: column;
-			gap: 24px;
-		}
-
-		.login-header {
-			display: flex;
-			flex-direction: row;
-			align-items: center;
-			justify-content: center;
-			gap: 16px;
-			margin-bottom: 8px;
-		}
-
-		.logo-icon {
-			width: 48px;
-			height: 48px;
+		.toast {
+			min-width: 260px;
+			padding: 14px 20px;
 			border-radius: 12px;
-			background: var(--primary-gradient);
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			font-weight: bold;
-			color: white;
-			font-size: 24px;
-			font-family: 'Outfit', sans-serif;
-		}
-
-		.logo-text {
-			font-size: 24px;
-			font-weight: 700;
-			letter-spacing: -0.5px;
-			background: var(--primary-gradient);
-			-webkit-background-clip: text;
-			-webkit-text-fill-color: transparent;
-		}
-
-		.stat-card {
-			background-color: var(--card-bg);
-			border: 1px solid var(--border-color);
-			border-radius: 16px;
-			padding: 24px;
-			display: flex;
-			flex-direction: column;
-			gap: 12px;
-			box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
-		}
-
-		.stat-title {
+			box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
 			font-size: 14px;
-			color: var(--text-muted);
-		}
-
-		.stat-value {
-			font-size: 32px;
-			font-weight: 700;
-			font-family: 'Outfit', sans-serif;
-		}
-
-		.progress-container {
-			width: 100%;
-			height: 8px;
-			background-color: rgba(255, 255, 255, 0.08);
-			border-radius: 4px;
-			overflow: hidden;
-			margin-top: 4px;
-		}
-
-		.progress-bar {
-			height: 100%;
-			background: var(--primary-gradient);
-			border-radius: 4px;
-			width: 0%;
-			transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
-		}
-
-		.section-card {
-			background-color: var(--card-bg);
-			border: 1px solid var(--border-color);
-			border-radius: 16px;
-			padding: 28px;
-			box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
-			display: flex;
-			flex-direction: column;
-			gap: 16px;
-		}
-
-		.section-title {
-			font-size: 18px;
 			font-weight: 600;
 			display: flex;
 			align-items: center;
-			gap: 8px;
+			gap: 12px;
+			backdrop-filter: blur(15px);
+			-webkit-backdrop-filter: blur(15px);
+			transform: translateY(-20px);
+			opacity: 0;
+			transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+			pointer-events: auto;
 		}
 
-		.form-group {
-			display: flex;
-			flex-direction: column;
-			gap: 8px;
+		.toast.show {
+			transform: translateY(0);
+			opacity: 1;
 		}
 
-		.form-group label {
-			font-size: 13px;
-			font-weight: 500;
-			color: var(--text-muted);
+		.toast-icon {
+			width: 20px;
+			height: 20px;
+			flex-shrink: 0;
 		}
 
-		input {
-			background-color: var(--input-bg);
-			border: 1px solid var(--input-border);
-			color: var(--input-text);
-			padding: 12px 16px;
-			border-radius: 8px;
-			outline: none;
-			font-size: 14px;
-			transition: border-color 0.2s;
+		.toast-success {
+			background-color: #10b981 !important;
+			color: #ffffff !important;
+			border: none !important;
+		}
+		.toast-success .toast-icon, .toast-success span {
+			color: #ffffff !important;
 		}
 
-		input:focus {
-			border-color: var(--accent-color);
+		.toast-error {
+			background-color: #ef4444 !important;
+			color: #ffffff !important;
+			border: none !important;
 		}
-
-		.btn {
-			display: inline-flex;
-			align-items: center;
-			justify-content: center;
-			padding: 12px 20px;
-			border-radius: 8px;
-			font-weight: 500;
-			font-size: 14px;
-			cursor: pointer;
-			border: none;
-			transition: all 0.2s;
+		.toast-error .toast-icon, .toast-error span {
+			color: #ffffff !important;
 		}
-
-		.btn-primary {
-			background: var(--primary-gradient);
-			color: white;
+		
+		.toast-warning {
+			background-color: #f59e0b !important;
+			color: #ffffff !important;
+			border: none !important;
 		}
-
-		.btn-primary:hover {
-			opacity: 0.9;
-			transform: translateY(-1px);
-		}
-
-		.btn-secondary {
-			background-color: var(--btn-secondary-bg);
-			color: var(--btn-secondary-text);
-			border: 1px solid var(--border-color);
-		}
-
-		.btn-secondary:hover {
-			background-color: var(--btn-secondary-hover);
+		.toast-warning .toast-icon, .toast-warning span {
+			color: #ffffff !important;
 		}
 	</style>
 </head>
 <body>
+
+	<!-- Dynamic Background Orbs -->
+	<div class="bg-orbs-container">
+		<div class="bg-orb bg-orb-1"></div>
+		<div class="bg-orb bg-orb-2"></div>
+	</div>
 
 	<!-- Floating Action Buttons -->
 	<div class="action-btn-group">
 		<button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
 			<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
 				<circle cx="12" cy="12" r="4" />
-				<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+				<path d="M12 2v2M12 20v2M4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
 			</svg>
 			<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
 				<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
@@ -1421,7 +1619,7 @@ async function handleLandingPage(request, env, ctx) {
 			<div class="progress-container">
 				<div class="progress-bar" id="public-progress" style="width: 0%;"></div>
 			</div>
-			<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+			<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px;">
 				<span id="public-limit-desc">总限额: 0 Neurons</span>
 				<span id="public-percent-desc">0%</span>
 			</div>
@@ -1442,7 +1640,7 @@ async function handleLandingPage(request, env, ctx) {
 			
 			${isLoggedIn ? `
 				<div style="text-align: center; display: flex; flex-direction: column; gap: 16px; margin-top: 10px;">
-					<div style="font-size: 40px;">🔑</div>
+					<div style="font-size: 40px; margin-bottom: 8px;">🎉</div>
 					<p style="font-size: 14px; color: var(--text-muted); line-height: 1.5;">您当前已登录管理员身份。</p>
 					<a href="/admin" class="btn btn-primary" style="width: 100%; text-decoration: none; display: flex; align-items: center; justify-content: center; height: 42px;">进入后台管理面板</a>
 					<button class="btn btn-secondary" onclick="submitLogout()" style="width: 100%; height: 42px;">安全退出</button>
@@ -1461,6 +1659,39 @@ async function handleLandingPage(request, env, ctx) {
 	</div>
 
 	<script>
+		// Toast Helper
+		function showToast(message, type = 'success') {
+			let container = document.querySelector('.toast-container');
+			if (!container) {
+				container = document.createElement('div');
+				container.className = 'toast-container';
+				document.body.appendChild(container);
+			}
+
+			const toast = document.createElement('div');
+			toast.className = \`toast toast-\${type}\`;
+			
+			let iconSvg = '';
+			if (type === 'success') {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>\`;
+			} else if (type === 'error') {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>\`;
+			} else {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>\`;
+			}
+
+			toast.innerHTML = \`\${iconSvg}<span>\${message}</span>\`;
+			container.appendChild(toast);
+
+			toast.offsetHeight; // trigger reflow
+			toast.classList.add('show');
+
+			setTimeout(() => {
+				toast.classList.remove('show');
+				setTimeout(() => toast.remove(), 400);
+			}, 3000);
+		}
+
 		function initTheme() {
 			const savedTheme = localStorage.getItem('theme');
 			if (savedTheme) {
@@ -1518,16 +1749,15 @@ async function handleLandingPage(request, env, ctx) {
 				const res = await fetch('/api/usage/summary');
 				const data = await res.json();
 				
+				const roundedPercent = Math.ceil(data.usagePercentage);
 				document.getElementById('public-neurons').innerText = Number(data.totalNeuronsToday).toLocaleString();
-				document.getElementById('public-progress').style.width = data.usagePercentage + '%';
+				document.getElementById('public-progress').style.width = roundedPercent + '%';
 				document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
-				document.getElementById('public-percent-desc').innerText = data.usagePercentage + '%';
+				document.getElementById('public-percent-desc').innerText = roundedPercent + '%';
 			} catch (e) {
 				console.error(e);
 			}
 		}
-
-
 
 		async function submitLogin() {
 			const password = document.getElementById('login-password').value;
@@ -1537,21 +1767,27 @@ async function handleLandingPage(request, env, ctx) {
 				body: JSON.stringify({ password })
 			});
 			if (res.ok) {
-				window.location.href = '/admin';
+				showToast('登录成功！跳转中...');
+				setTimeout(() => {
+					window.location.href = '/admin';
+				}, 600);
 			} else {
 				const data = await res.json();
-				alert('登录失败: ' + (data.error || '密码不正确！'));
+				showToast('登录失败: ' + (data.error || '密码不正确！'), 'error');
 			}
 		}
 
 		async function submitLogout() {
 			const res = await fetch('/api/auth/logout', { method: 'POST' });
 			if (res.ok) {
-				window.location.reload();
+				showToast('安全退出成功');
+				setTimeout(() => {
+					window.location.reload();
+				}, 600);
 			}
 		}
 	</script>
-	<footer style="text-align: center; padding: 16px 0 20px; font-size: 12px; color: var(--text-muted); opacity: 0.6;">
+	<footer style="text-align: center; padding: 24px 0 20px; font-size: 12px; color: var(--text-muted); opacity: 0.6; z-index: 10;">
 		由 <a href="https://github.com/cmliussss2024/WorkersAI2API" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">WorkersAI2API</a> 强力驱动
 	</footer>
 </body>
@@ -1565,7 +1801,6 @@ async function handleLandingPage(request, env, ctx) {
 // 2. 后台管理控制台页面
 function handleAdminPage(request, env, ctx) {
 	const html = `<!DOCTYPE html>
-<html lang="zh-CN">
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1576,46 +1811,70 @@ function handleAdminPage(request, env, ctx) {
 	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<style>
 		:root {
-			--bg-color: #0f172a;
-			--card-bg: #1e293b;
-			--border-color: rgba(255, 255, 255, 0.06);
-			--text-main: #f1f5f9;
+			--bg-color: #0b0f19;
+			--sidebar-bg: rgba(15, 23, 42, 0.6);
+			--card-bg: rgba(30, 41, 59, 0.45);
+			--border-color: rgba(255, 255, 255, 0.08);
+			--text-main: #f8fafc;
 			--text-muted: #94a3b8;
-			--primary-gradient: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
-			--accent-color: #a78bfa;
+			--primary-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 50%, #ec4899 100%);
+			--accent-color: #a855f7;
 			--success-color: #10b981;
 			--warning-color: #f59e0b;
 			--danger-color: #ef4444;
 			--sidebar-width: 260px;
-			--sidebar-bg: #090d16;
-			--sidebar-menu-hover: rgba(255, 255, 255, 0.05);
-			--input-bg: rgba(255, 255, 255, 0.08);
+			--sidebar-menu-hover: rgba(255, 255, 255, 0.04);
+			--input-bg: rgba(15, 23, 42, 0.6);
 			--input-border: rgba(255, 255, 255, 0.1);
+			--input-text: #f8fafc;
 			--table-header-bg: rgba(0, 0, 0, 0.2);
-			--btn-secondary-bg: rgba(255, 255, 255, 0.08);
+			--btn-secondary-bg: rgba(255, 255, 255, 0.06);
 			--btn-secondary-hover: rgba(255, 255, 255, 0.12);
-			--modal-overlay-bg: rgba(0, 0, 0, 0.7);
+			--btn-secondary-text: #f8fafc;
+			--modal-overlay-bg: rgba(8, 10, 18, 0.6);
 			--section-item-bg: rgba(255, 255, 255, 0.02);
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+			--orb-1-color: rgba(99, 102, 241, 0.12);
+			--orb-2-color: rgba(236, 72, 153, 0.08);
+			
+			/* Theme aware code tag tokens */
+			--code-bg: rgba(0, 0, 0, 0.25);
+			--code-color: #e9d5ff;
+			--code-border: rgba(255, 255, 255, 0.04);
 		}
 
 		:root[data-theme="light"] {
-			--bg-color: #f8fafc;
-			--card-bg: #ffffff;
-			--border-color: rgba(0, 0, 0, 0.08);
+			--bg-color: #f1f5f9;
+			--sidebar-bg: rgba(255, 255, 255, 0.6);
+			--card-bg: rgba(255, 255, 255, 0.7);
+			--border-color: rgba(0, 0, 0, 0.06);
 			--text-main: #0f172a;
 			--text-muted: #64748b;
-			--primary-gradient: linear-gradient(135deg, #7c3aed 0%, #db2777 100%);
-			--accent-color: #7c3aed;
-			--sidebar-bg: #f1f5f9;
+			--primary-gradient: linear-gradient(135deg, #4f46e5 0%, #9333ea 50%, #db2777 100%);
+			--accent-color: #9333ea;
+			--success-color: #10b981;
+			--warning-color: #f59e0b;
+			--danger-color: #ef4444;
 			--sidebar-menu-hover: rgba(0, 0, 0, 0.04);
-			--input-bg: #f1f5f9;
+			--input-bg: rgba(241, 245, 249, 0.8);
+			--input-border: rgba(0, 0, 0, 0.08);
 			--input-text: #0f172a;
-			--input-border: rgba(0, 0, 0, 0.1);
-			--table-header-bg: #f8fafc;
-			--btn-secondary-bg: #e2e8f0;
-			--btn-secondary-hover: #cbd5e1;
-			--modal-overlay-bg: rgba(0, 0, 0, 0.5);
-			--section-item-bg: rgba(0, 0, 0, 0.02);
+			--table-header-bg: rgba(0, 0, 0, 0.03);
+			--btn-secondary-bg: rgba(0, 0, 0, 0.04);
+			--btn-secondary-hover: rgba(0, 0, 0, 0.08);
+			--btn-secondary-text: #0f172a;
+			--modal-overlay-bg: rgba(241, 245, 249, 0.5);
+			--section-item-bg: rgba(0, 0, 0, 0.01);
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+			--orb-1-color: rgba(99, 102, 241, 0.06);
+			--orb-2-color: rgba(236, 72, 153, 0.04);
+			
+			/* Theme aware code tag tokens */
+			--code-bg: rgba(79, 70, 229, 0.07);
+			--code-color: #4f46e5;
+			--code-border: rgba(79, 70, 229, 0.15);
 		}
 
 		* {
@@ -1631,52 +1890,80 @@ function handleAdminPage(request, env, ctx) {
 			min-height: 100vh;
 			display: flex;
 			flex-direction: column;
+			overflow-x: hidden;
+			position: relative;
 		}
 
-		h1, h2, h3, h4 {
-			font-family: 'Outfit', sans-serif;
-			font-weight: 600;
+		/* Utility Hidden Class */
+		.hidden {
+			display: none !important;
 		}
 
-		button, input, select {
-			font-family: inherit;
+		/* Dynamic Background Orbs */
+		.bg-orbs-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: -1;
+			overflow: hidden;
+			pointer-events: none;
 		}
 
-		/* Scrollbars */
-		::-webkit-scrollbar {
-			width: 6px;
-			height: 6px;
-		}
-		::-webkit-scrollbar-track {
-			background: transparent;
-		}
-		::-webkit-scrollbar-thumb {
-			background: rgba(255, 255, 255, 0.1);
-			border-radius: 4px;
-		}
-		::-webkit-scrollbar-thumb:hover {
-			background: rgba(255, 255, 255, 0.2);
+		.bg-orb {
+			position: absolute;
+			border-radius: 50%;
+			filter: blur(100px);
+			animation: float 25s infinite alternate ease-in-out;
 		}
 
-		/* Layout */
+		.bg-orb-1 {
+			top: -10%;
+			left: -10%;
+			width: 50vw;
+			height: 50vw;
+			background: var(--orb-1-color);
+			animation-duration: 20s;
+		}
+
+		.bg-orb-2 {
+			bottom: -10%;
+			right: -10%;
+			width: 60vw;
+			height: 60vw;
+			background: var(--orb-2-color);
+			animation-duration: 30s;
+			animation-delay: -5s;
+		}
+
+		@keyframes float {
+			0% { transform: translate(0, 0) scale(1); }
+			100% { transform: translate(5%, 5%) scale(1.05); }
+		}
+
+		/* Sidebar Layout */
 		.app-container {
 			display: flex;
-			flex: 1;
+			min-height: 100vh;
+			position: relative;
 		}
 
-		/* Sidebar */
 		aside {
 			width: var(--sidebar-width);
 			background-color: var(--sidebar-bg);
 			border-right: 1px solid var(--border-color);
 			display: flex;
 			flex-direction: column;
-			padding: 24px;
+			padding: 30px 20px;
 			position: fixed;
 			top: 0;
 			bottom: 0;
 			left: 0;
 			z-index: 100;
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 		}
 
 		.logo-area {
@@ -1684,25 +1971,28 @@ function handleAdminPage(request, env, ctx) {
 			align-items: center;
 			gap: 12px;
 			margin-bottom: 40px;
+			padding-left: 8px;
 		}
 
 		.logo-icon {
-			width: 36px;
-			height: 36px;
-			border-radius: 8px;
+			width: 38px;
+			height: 38px;
+			border-radius: 10px;
 			background: var(--primary-gradient);
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			font-weight: bold;
 			color: white;
-			font-size: 20px;
+			font-size: 18px;
 			font-family: 'Outfit', sans-serif;
+			box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
 		}
 
 		.logo-text {
 			font-size: 18px;
 			font-weight: 700;
+			font-family: 'Outfit', sans-serif;
 			letter-spacing: -0.5px;
 			background: var(--primary-gradient);
 			-webkit-background-clip: text;
@@ -1721,59 +2011,51 @@ function handleAdminPage(request, env, ctx) {
 			align-items: center;
 			gap: 12px;
 			padding: 12px 16px;
-			border-radius: 8px;
-			color: var(--text-muted);
-			text-decoration: none;
+			border-radius: 10px;
 			cursor: pointer;
-			font-weight: 500;
 			font-size: 14px;
-			transition: all 0.2s ease-in-out;
+			font-weight: 500;
+			color: var(--text-muted);
+			transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 		}
 
-		.nav-item:hover, .nav-item.active {
+		.nav-item:hover {
 			color: var(--text-main);
 			background-color: var(--sidebar-menu-hover);
+			transform: translateX(4px);
 		}
 
 		.nav-item.active {
-			background: rgba(139, 92, 246, 0.15);
-			color: var(--accent-color);
-			border-left: 3px solid var(--accent-color);
-			border-top-left-radius: 0;
-			border-bottom-left-radius: 0;
+			color: white;
+			background: var(--primary-gradient);
+			box-shadow: 0 4px 14px rgba(168, 85, 247, 0.2);
 		}
 
 		.aside-footer {
 			display: flex;
 			flex-direction: column;
 			gap: 12px;
-			padding-top: 20px;
 			border-top: 1px solid var(--border-color);
+			padding-top: 20px;
 		}
 
-		/* Main Area */
+		/* Main Content Area */
 		main {
 			flex: 1;
 			margin-left: var(--sidebar-width);
 			padding: 40px;
-			display: flex;
-			flex-direction: column;
-			gap: 30px;
+			min-width: 0;
+			z-index: 10;
 		}
 
 		header {
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
+			margin-bottom: 30px;
 		}
 
-		.user-profile {
-			display: flex;
-			align-items: center;
-			gap: 12px;
-		}
-
-		/* Cards */
+		/* Card Grid & Stats */
 		.card-grid {
 			display: grid;
 			grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -1783,35 +2065,27 @@ function handleAdminPage(request, env, ctx) {
 		.stat-card {
 			background-color: var(--card-bg);
 			border: 1px solid var(--border-color);
-			border-radius: 16px;
-			padding: 24px;
+			border-radius: 18px;
+			padding: 26px;
 			display: flex;
 			flex-direction: column;
-			gap: 12px;
-			position: relative;
-			overflow: hidden;
-			box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
+			gap: 14px;
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
 		}
 
-		.stat-card::before {
-			content: '';
-			position: absolute;
-			top: 0;
-			left: 0;
-			width: 100%;
-			height: 4px;
-			background: var(--primary-gradient);
-			opacity: 0;
-			transition: opacity 0.25s;
-		}
-
-		.stat-card:hover::before {
-			opacity: 1;
+		.stat-card:hover {
+			transform: translateY(-4px);
+			border-color: rgba(168, 85, 247, 0.3);
+			box-shadow: 0 12px 30px rgba(168, 85, 247, 0.1);
 		}
 
 		.stat-title {
 			font-size: 14px;
 			color: var(--text-muted);
+			font-weight: 500;
 		}
 
 		.stat-value {
@@ -1825,53 +2099,54 @@ function handleAdminPage(request, env, ctx) {
 			color: var(--text-muted);
 		}
 
-		/* Progress bar */
 		.progress-container {
 			width: 100%;
-			height: 8px;
-			background-color: rgba(255, 255, 255, 0.08);
-			border-radius: 4px;
+			height: 6px;
+			background-color: rgba(255, 255, 255, 0.06);
+			border-radius: 3px;
 			overflow: hidden;
-			margin-top: 4px;
+		}
+
+		:root[data-theme="light"] .progress-container {
+			background-color: rgba(0, 0, 0, 0.05);
 		}
 
 		.progress-bar {
 			height: 100%;
 			background: var(--primary-gradient);
-			border-radius: 4px;
 			width: 0%;
-			transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+			transition: width 1.2s cubic-bezier(0.34, 1.56, 0.64, 1);
 		}
 
-		/* Sections */
+		/* Section Cards */
 		.section-card {
 			background-color: var(--card-bg);
 			border: 1px solid var(--border-color);
-			border-radius: 16px;
-			padding: 28px;
-			box-shadow: 0 4px 30px rgba(0, 0, 0, 0.15);
-			display: flex;
-			flex-direction: column;
-			gap: 20px;
+			border-radius: 18px;
+			padding: 30px;
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			margin-bottom: 24px;
 		}
 
 		.section-header {
 			display: flex;
 			justify-content: space-between;
 			align-items: center;
-			border-bottom: 1px solid var(--border-color);
-			padding-bottom: 16px;
+			margin-bottom: 20px;
 		}
 
 		.section-title {
 			font-size: 18px;
 			font-weight: 600;
+			font-family: 'Outfit', sans-serif;
 			display: flex;
 			align-items: center;
 			gap: 8px;
 		}
 
-		/* Forms */
+		/* Forms & Inputs */
 		.form-group {
 			display: flex;
 			flex-direction: column;
@@ -1885,19 +2160,26 @@ function handleAdminPage(request, env, ctx) {
 			color: var(--text-muted);
 		}
 
-		input, select, textarea {
+		input {
 			background-color: var(--input-bg);
 			border: 1px solid var(--input-border);
-			color: var(--text-main);
+			color: var(--input-text);
 			padding: 12px 16px;
-			border-radius: 8px;
+			border-radius: 10px;
 			outline: none;
 			font-size: 14px;
-			transition: border-color 0.2s;
+			transition: all 0.3s ease;
+			backdrop-filter: blur(10px);
 		}
 
-		input:focus, select:focus, textarea:focus {
+		input:focus {
 			border-color: var(--accent-color);
+			box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.2);
+			background-color: rgba(15, 23, 42, 0.8);
+		}
+
+		:root[data-theme="light"] input:focus {
+			background-color: rgba(255, 255, 255, 0.95);
 		}
 
 		/* Buttons */
@@ -1905,44 +2187,37 @@ function handleAdminPage(request, env, ctx) {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			gap: 8px;
-			padding: 12px 20px;
-			border-radius: 8px;
-			font-weight: 500;
+			padding: 10px 18px;
+			border-radius: 10px;
+			font-weight: 600;
 			font-size: 14px;
 			cursor: pointer;
 			border: none;
-			transition: all 0.2s;
-			text-decoration: none;
+			transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+			gap: 8px;
 		}
 
 		.btn-primary {
 			background: var(--primary-gradient);
 			color: white;
+			box-shadow: 0 4px 14px rgba(168, 85, 247, 0.3);
 		}
 
 		.btn-primary:hover {
-			opacity: 0.9;
-			transform: translateY(-1px);
+			transform: translateY(-2px);
+			box-shadow: 0 6px 20px rgba(168, 85, 247, 0.5);
+			opacity: 0.95;
 		}
 
 		.btn-secondary {
 			background-color: var(--btn-secondary-bg);
-			color: var(--text-main);
+			color: var(--btn-secondary-text);
 			border: 1px solid var(--border-color);
 		}
 
 		.btn-secondary:hover {
 			background-color: var(--btn-secondary-hover);
-		}
-
-		.btn-danger {
-			background-color: var(--danger-color);
-			color: white;
-		}
-
-		.btn-danger:hover {
-			opacity: 0.9;
+			transform: translateY(-1px);
 		}
 
 		/* Tables */
@@ -1950,117 +2225,56 @@ function handleAdminPage(request, env, ctx) {
 			width: 100%;
 			border-collapse: collapse;
 			text-align: left;
-		}
-
-		th, td {
-			padding: 14px 16px;
-			border-bottom: 1px solid var(--border-color);
 			font-size: 14px;
 		}
 
 		th {
+			background-color: var(--table-header-bg);
+			font-weight: 600;
 			color: var(--text-muted);
-			font-weight: 500;
+			padding: 16px 20px;
+			border-bottom: 1px solid var(--border-color);
 		}
 
-		tr:last-child td {
-			border-bottom: none;
+		td {
+			padding: 16px 20px;
+			border-bottom: 1px solid var(--border-color);
+			color: var(--text-main);
+		}
+
+		tr:hover td {
+			background-color: rgba(255, 255, 255, 0.01);
+		}
+
+		code {
+			font-family: monospace;
+			background-color: var(--code-bg);
+			padding: 4px 8px;
+			border-radius: 6px;
+			font-size: 13px;
+			color: var(--code-color);
+			border: 1px solid var(--code-border);
+			transition: all 0.2s ease;
 		}
 
 		/* Badges */
 		.badge {
 			display: inline-flex;
-			align-items: center;
-			padding: 4px 10px;
-			border-radius: 12px;
-			font-size: 12px;
-			font-weight: 500;
+			padding: 4px 8px;
+			border-radius: 6px;
+			font-size: 11px;
+			font-weight: 600;
 		}
 
-		.badge-success {
-			background-color: rgba(16, 185, 129, 0.15);
-			color: var(--success-color);
-		}
+		.badge-success { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
+		.badge-warning { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+		.badge-danger { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
-		.badge-warning {
-			background-color: rgba(245, 158, 11, 0.15);
-			color: var(--warning-color);
-		}
-
-		.badge-danger {
-			background-color: rgba(239, 68, 68, 0.15);
-			color: var(--danger-color);
-		}
-
-		/* Modal */
-		.modal-overlay {
-			position: fixed;
-			top: 0;
-			left: 0;
-			right: 0;
-			bottom: 0;
-			background-color: var(--modal-overlay-bg);
-			backdrop-filter: blur(5px);
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			z-index: 1000;
-			opacity: 0;
-			pointer-events: none;
-			transition: opacity 0.25s ease-in-out;
-		}
-
-		.modal-overlay.active {
-			opacity: 1;
-			pointer-events: auto;
-		}
-
-		.modal-card {
-			background-color: var(--card-bg);
-			border: 1px solid var(--border-color);
-			border-radius: 16px;
-			width: 90%;
-			max-width: 500px;
-			padding: 28px;
-			display: flex;
-			flex-direction: column;
-			gap: 20px;
-			transform: scale(0.95);
-			transition: transform 0.25s ease-in-out;
-			box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
-		}
-
-		.modal-overlay.active .modal-card {
-			transform: scale(1);
-		}
-
-		.modal-header {
-			display: flex;
-			justify-content: space-between;
-			align-items: center;
-			border-bottom: 1px solid var(--border-color);
-			padding-bottom: 12px;
-		}
-
-		.modal-footer {
-			display: flex;
-			justify-content: flex-end;
-			gap: 12px;
-			border-top: 1px solid var(--border-color);
-			padding-top: 16px;
-		}
-
-		/* Charts Container */
+		/* Charts */
 		.charts-grid {
 			display: grid;
-			grid-template-columns: 2fr 1fr;
+			grid-template-columns: 1.5fr 1fr;
 			gap: 20px;
-		}
-
-		@media (max-width: 900px) {
-			.charts-grid {
-				grid-template-columns: 1fr;
-			}
 		}
 
 		.chart-container {
@@ -2069,22 +2283,157 @@ function handleAdminPage(request, env, ctx) {
 			width: 100%;
 		}
 
-		/* Utility */
-		.hidden {
+		@media (max-width: 900px) {
+			.charts-grid {
+				grid-template-columns: 1fr;
+			}
+		}
+
+		/* Modals */
+		.modal-overlay {
+			position: fixed;
+			top: 0;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			background-color: var(--modal-overlay-bg);
+			backdrop-filter: blur(0px);
+			-webkit-backdrop-filter: blur(0px);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			z-index: 1000;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 0.3s ease, backdrop-filter 0.3s ease, -webkit-backdrop-filter 0.3s ease;
+		}
+
+		.modal-overlay.active {
+			opacity: 1;
+			pointer-events: auto;
+			backdrop-filter: blur(8px);
+			-webkit-backdrop-filter: blur(8px);
+		}
+
+		.modal-card {
+			background-color: var(--card-bg);
+			border: 1px solid var(--border-color);
+			border-radius: 20px;
+			width: 100%;
+			max-width: 500px;
+			padding: 32px;
+			box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+			display: flex;
+			flex-direction: column;
+			gap: 20px;
+			transform: scale(0.9) translateY(20px);
+			transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.3s;
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+		}
+
+		.modal-overlay.active .modal-card {
+			transform: scale(1) translateY(0);
+		}
+
+		.modal-header {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			border-bottom: 1px solid var(--border-color);
+			padding-bottom: 16px;
+		}
+
+		.modal-header h3 {
+			font-size: 18px;
+			font-weight: 600;
+		}
+
+		.modal-footer {
+			display: flex;
+			justify-content: flex-end;
+			gap: 12px;
+			border-top: 1px solid var(--border-color);
+			padding-top: 20px;
+			margin-top: 10px;
+		}
+
+		/* Toast Notification (Green for success, Red for error, Orange for warning) */
+		.toast-container {
+			position: fixed;
+			top: 24px;
+			right: 24px;
+			display: flex;
+			flex-direction: column;
+			gap: 10px;
+			z-index: 9999;
+			pointer-events: none;
+		}
+
+		.toast {
+			min-width: 260px;
+			padding: 14px 20px;
+			border-radius: 12px;
+			box-shadow: var(--card-shadow);
+			font-size: 14px;
+			font-weight: 600;
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			backdrop-filter: blur(15px);
+			-webkit-backdrop-filter: blur(15px);
+			transform: translateY(-20px);
+			opacity: 0;
+			transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+			pointer-events: auto;
+		}
+
+		.toast.show {
+			transform: translateY(0);
+			opacity: 1;
+		}
+
+		.toast-icon {
+			width: 20px;
+			height: 20px;
+			flex-shrink: 0;
+		}
+
+		.toast-success {
+			background-color: #10b981 !important;
+			color: #ffffff !important;
+			border: none !important;
+		}
+		.toast-success .toast-icon, .toast-success span {
+			color: #ffffff !important;
+		}
+
+		.toast-error {
+			background-color: #ef4444 !important;
+			color: #ffffff !important;
+			border: none !important;
+		}
+		.toast-error .toast-icon, .toast-error span {
+			color: #ffffff !important;
+		}
+		
+		.toast-warning {
+			background-color: #f59e0b !important;
+			color: #ffffff !important;
+			border: none !important;
+		}
+		.toast-warning .toast-icon, .toast-warning span {
+			color: #ffffff !important;
+		}
+
+		/* Mobile Responsiveness */
+		.mobile-header {
 			display: none !important;
 		}
 
-		.flex-row-gap {
-			display: flex;
-			gap: 12px;
-			align-items: center;
-		}
-
-		/* Mobile Responsive Sidebar */
 		@media (max-width: 768px) {
 			aside {
 				transform: translateX(-100%);
-				transition: transform 0.3s ease-in-out;
 			}
 			aside.active {
 				transform: translateX(0);
@@ -2093,26 +2442,29 @@ function handleAdminPage(request, env, ctx) {
 				margin-left: 0;
 				padding: 20px;
 			}
+			.mobile-header {
+				display: flex !important;
+			}
 			.mobile-nav-toggle {
+				background: none;
+				border: none;
+				color: var(--text-main);
 				display: flex;
 				align-items: center;
-				gap: 8px;
-				background-color: var(--card-bg);
-				padding: 8px 16px;
-				border-radius: 8px;
-				border: 1px solid var(--border-color);
+				gap: 6px;
 				cursor: pointer;
-			}
-		}
-
-		@media (min-width: 769px) {
-			.mobile-nav-toggle {
-				display: none;
+				font-size: 14px;
+				font-weight: 500;
 			}
 		}
 	</style>
 </head>
 <body>
+	<!-- Dynamic Background Orbs -->
+	<div class="bg-orbs-container">
+		<div class="bg-orb bg-orb-1"></div>
+		<div class="bg-orb bg-orb-2"></div>
+	</div>
 
 	<!-- App Header for Mobile Toggle -->
 	<div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--sidebar-bg); border-bottom: 1px solid var(--border-color); z-index: 90;" class="mobile-header">
@@ -2155,11 +2507,11 @@ function handleAdminPage(request, env, ctx) {
 				</div>
 			</div>
 
-			<div class="aside-footer" style="display: flex; flex-direction: column; gap: 12px; padding-top: 20px; border-top: 1px solid var(--border-color);">
+			<div class="aside-footer">
 				<button class="btn btn-secondary" onclick="toggleTheme()" title="切换日间/夜间模式" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
 					<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
 						<circle cx="12" cy="12" r="4" />
-						<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+						<path d="M12 2v2M12 20v2M4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
 					</svg>
 					<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
 						<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
@@ -2181,7 +2533,7 @@ function handleAdminPage(request, env, ctx) {
 				<header>
 					<div>
 						<h1 style="font-size: 26px; font-weight: 700;" id="view-title">控制台</h1>
-						<p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">实时监控 Cloudflare AI 账号及接口状态</p>
+						<p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">实时监控 Cloudflare AI 账号及接口 status</p>
 					</div>
 					<div class="user-profile">
 						<span class="badge badge-success">系统正常运行</span>
@@ -2192,7 +2544,12 @@ function handleAdminPage(request, env, ctx) {
 				<div id="tab-overview" class="tab-content">
 					<div class="card-grid">
 						<div class="stat-card">
-							<div class="stat-title">今日总消耗量</div>
+							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+								<div class="stat-title">今日总消耗量</div>
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: var(--accent-color); opacity: 0.85;">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+								</svg>
+							</div>
 							<div class="stat-value" id="stat-total-neurons">0</div>
 							<div class="progress-container">
 								<div class="progress-bar" id="stat-neurons-progress" style="width: 0%;"></div>
@@ -2200,17 +2557,32 @@ function handleAdminPage(request, env, ctx) {
 							<div class="stat-desc" id="stat-neurons-desc">0 / 0 Neurons (0.00%)</div>
 						</div>
 						<div class="stat-card">
-							<div class="stat-title">已绑定账号</div>
+							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+								<div class="stat-title">已绑定账号</div>
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: var(--accent-color); opacity: 0.85;">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+								</svg>
+							</div>
 							<div class="stat-value" id="stat-accounts-count">0</div>
 							<div class="stat-desc">活跃中的 Cloudflare 账号数</div>
 						</div>
 						<div class="stat-card">
-							<div class="stat-title">代理 API 密钥</div>
+							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+								<div class="stat-title">代理 API 密钥</div>
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: var(--accent-color); opacity: 0.85;">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+								</svg>
+							</div>
 							<div class="stat-value" id="stat-keys-count">0</div>
-							<div class="stat-desc">已配额的第三方调用 Key 数</div>
+							<div class="stat-desc">已配额的第三方调用 Key数</div>
 						</div>
 						<div class="stat-card">
-							<div class="stat-title">节省成本 (估算)</div>
+							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
+								<div class="stat-title">节省成本 (估算)</div>
+								<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="width: 22px; height: 22px; color: var(--accent-color); opacity: 0.85;">
+									<path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+								</svg>
+							</div>
 							<div class="stat-value" id="stat-cost-saving">$0.00</div>
 							<div class="stat-desc">对比 OpenAI completions 同等额度价格</div>
 						</div>
@@ -2318,7 +2690,7 @@ function handleAdminPage(request, env, ctx) {
 				<div id="tab-settings" class="tab-content hidden">
 					<div class="section-card">
 						<div class="section-title">自定义模型映射 (Model Mappings)</div>
-						<p style="font-size: 13px; color: var(--text-muted); margin-top: -10px;">您可以设置请求中的模型名字（例如 gpt-3.5-turbo）应该被反向代理路由去哪一个具体的 Cloudflare AI 对应模型。若请求的模型以 @cf/ 开头，则默认透传不会经过映射。</p>
+						<p style="font-size: 13px; color: var(--text-muted); margin-top: 8px; margin-bottom: 20px; line-height: 1.6;">您可以设置请求中的模型名字（例如 gpt-3.5-turbo）应该被反向代理路由去哪一个具体的 Cloudflare AI 对应模型。若请求的模型以 @cf/ 开头，则默认透传不会经过映射。</p>
 						
 						<div style="display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 15px; background-color: var(--section-item-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); margin-top: 10px;">
 							<div class="form-group" style="margin-bottom: 0;">
@@ -2369,12 +2741,12 @@ function handleAdminPage(request, env, ctx) {
 				<input type="text" id="account-name" placeholder="请输入备注名">
 			</div>
 			<div class="form-group">
-				<label for="account-id">Cloudflare Account ID</label>
+				<label for="account-id">Account ID</label>
 				<input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面">
 			</div>
 			<div class="form-group">
-				<label for="account-token">Workers AI API Token (需要创建并赋予以下 3 个权限):</label>
-				<div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.1); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
+				<label for="account-token">API Token (需要创建并赋予以下 3 个权限):</label>
+				<div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
 					• Workers AI &gt; Read<br>
 					• Workers AI &gt; Edit<br>
 					• Account Analytics &gt; Read
@@ -2395,22 +2767,40 @@ function handleAdminPage(request, env, ctx) {
 	<div class="modal-overlay" id="key-modal">
 		<div class="modal-card">
 			<div class="modal-header">
-				<h3>生成新 API 密钥</h3>
+				<h3 id="key-modal-title">生成新 API 密钥</h3>
 				<button onclick="closeKeyModal()" style="background: none; border: none; color: var(--text-muted); cursor: pointer;">
 					<svg style="width: 20px; height: 20px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
 				</button>
 			</div>
-			<div class="form-group">
-				<label for="key-name">密钥描述/使用客户端 (如: Cursor / NextChat)</label>
-				<input type="text" id="key-name" placeholder="请输入描述名">
+			<div id="key-modal-form">
+				<div class="form-group" style="margin-bottom: 16px;">
+					<label for="key-name">密钥描述/使用客户端 (如: Cursor / NextChat)</label>
+					<input type="text" id="key-name" placeholder="请输入描述名" style="width: 100%;">
+				</div>
+				<div class="form-group" style="margin-bottom: 16px;">
+					<label for="key-val">API 密钥值 (可选，为空则随机生成 sk-wa-...)</label>
+					<input type="text" id="key-val" placeholder="留空则随机生成密钥" style="width: 100%;">
+				</div>
+				<div class="modal-footer" style="margin-top: 10px; display: flex; gap: 12px; justify-content: flex-end; width: 100%;">
+					<button class="btn btn-secondary" onclick="closeKeyModal()">取消</button>
+					<button class="btn btn-primary" onclick="saveKey()">生成密钥</button>
+				</div>
 			</div>
-			<div class="form-group">
-				<label for="key-val">API 密钥值 (可选，为空则随机生成 sk-wa-...)</label>
-				<input type="text" id="key-val" placeholder="留空则随机生成密钥">
-			</div>
-			<div class="modal-footer">
-				<button class="btn btn-secondary" onclick="closeKeyModal()">取消</button>
-				<button class="btn btn-primary" onclick="saveKey()">生成密钥</button>
+			<div id="key-modal-success" class="hidden" style="display: flex; flex-direction: column; gap: 16px;">
+				<div style="text-align: center; color: var(--success-color); font-size: 40px; margin-bottom: 8px;">🎉</div>
+				<p style="font-size: 14px; text-align: center; line-height: 1.6; color: var(--text-main);">
+					密钥生成成功！请务必复制保存此密钥，关闭后将无法再次完整查看。
+				</p>
+				<div class="form-group">
+					<label>API Key</label>
+					<div style="display: flex; gap: 10px;">
+						<input type="text" id="generated-key-val" readonly style="flex: 1; font-family: monospace;">
+						<button class="btn btn-primary" onclick="copyGeneratedKey()">复制</button>
+					</div>
+				</div>
+				<div class="modal-footer" style="margin-top: 10px; width: 100%;">
+					<button class="btn btn-secondary" onclick="closeKeyModal()" style="width: 100%;">我已保存，关闭</button>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -2421,6 +2811,39 @@ function handleAdminPage(request, env, ctx) {
 		let modelsChart = null;
 		const defaultMappings = ${JSON.stringify(DEFAULT_MODEL_MAP)};
 		let customMappings = {};
+
+		// Toast Helper
+		function showToast(message, type = 'success') {
+			let container = document.querySelector('.toast-container');
+			if (!container) {
+				container = document.createElement('div');
+				container.className = 'toast-container';
+				document.body.appendChild(container);
+			}
+
+			const toast = document.createElement('div');
+			toast.className = \`toast toast-\${type}\`;
+			
+			let iconSvg = '';
+			if (type === 'success') {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>\`;
+			} else if (type === 'error') {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>\`;
+			} else {
+				iconSvg = \`<svg class="toast-icon" style="color: #ffffff;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>\`;
+			}
+
+			toast.innerHTML = \`\${iconSvg}<span>\${message}</span>\`;
+			container.appendChild(toast);
+
+			toast.offsetHeight; // trigger reflow
+			toast.classList.add('show');
+
+			setTimeout(() => {
+				toast.classList.remove('show');
+				setTimeout(() => toast.remove(), 400);
+			}, 3000);
+		}
 
 		function initTheme() {
 			const savedTheme = localStorage.getItem('theme');
@@ -2440,7 +2863,6 @@ function handleAdminPage(request, env, ctx) {
 			document.documentElement.setAttribute('data-theme', newTheme);
 			localStorage.setItem('theme', newTheme);
 			updateThemeIcons();
-			// 重新画一下图表，让颜色跟着主题变
 			if (currentTab === 'overview') {
 				loadUsageDetails();
 			}
@@ -2462,7 +2884,6 @@ function handleAdminPage(request, env, ctx) {
 		initTheme();
 
 		window.onload = function() {
-			// 设置代理地址的基础 URL
 			document.getElementById('proxy-base-url').value = window.location.origin + '/v1';
 			switchTab('overview');
 		};
@@ -2474,21 +2895,21 @@ function handleAdminPage(request, env, ctx) {
 		async function logout() {
 			const res = await fetch('/api/auth/logout', { method: 'POST' });
 			if (res.ok) {
-				window.location.href = '/';
+				showToast('已安全退出登录');
+				setTimeout(() => {
+					window.location.href = '/';
+				}, 800);
 			}
 		}
 
 		function switchTab(tabName) {
 			currentTab = tabName;
-			// 更新左侧菜单的选中状态
 			document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
 			document.getElementById('menu-' + tabName).classList.add('active');
 
-			// 切换显示对应的页面内容
 			document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
 			document.getElementById('tab-' + tabName).classList.remove('hidden');
 
-			// 更新页面标题
 			const titles = {
 				overview: '控制台',
 				accounts: '账号管理',
@@ -2496,11 +2917,8 @@ function handleAdminPage(request, env, ctx) {
 				settings: '自定义模型映射'
 			};
 			document.getElementById('view-title').innerText = titles[tabName];
-
-			// 在手机端收起侧边栏
 			document.getElementById('sidebar').classList.remove('active');
 
-			// 加载该页面对应的数据
 			if (tabName === 'overview') {
 				loadUsageDetails();
 			} else if (tabName === 'accounts') {
@@ -2512,7 +2930,6 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
-		// 带鉴权的请求封装（接口返回 401 未授权时自动跳回登录页）
 		async function apiFetch(path, options = {}) {
 			const res = await fetch(path, options);
 			if (res.status === 401) {
@@ -2522,9 +2939,6 @@ function handleAdminPage(request, env, ctx) {
 			return res;
 		}
 
-		// ------------------------------------------------
-		// 页签：控制台的数据和图表
-		// ------------------------------------------------
 		async function loadUsageDetails() {
 			try {
 				const res = await apiFetch('/api/accounts/usage');
@@ -2539,38 +2953,37 @@ function handleAdminPage(request, env, ctx) {
 				usageList.innerHTML = '';
 
 				if (data.length === 0) {
-					usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
+					usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px; width: 100%;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
 					return;
 				}
 
 				data.forEach(account => {
 					totalUsageToday += account.usageToday;
 
-					// 单个账号的展示卡片
-					const percentage = Math.min(100, parseFloat(((account.usageToday / 10000) * 100).toFixed(1)));
+					const percentage = Math.min(100, Math.ceil((account.usageToday / 10000) * 100));
 					const warningClass = account.status === 'error' ? 'badge-danger' : (percentage >= 90 ? 'badge-warning' : 'badge-success');
 					const statusText = account.status === 'error' ? '连接异常' : (percentage >= 100 ? '用尽 (10k)' : '正常运行');
 					
 					const item = document.createElement('div');
 					item.className = 'section-card';
-					item.style.padding = '18px';
+					item.style.padding = '20px';
 					item.style.backgroundColor = 'rgba(255,255,255,0.01)';
 					item.innerHTML = \`
-						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
 							<div>
-								<strong style="font-size:15px;">\${account.name}</strong>
+								<strong style="font-size:15px; font-weight:600;">\${account.name}</strong>
 								<span style="font-size:12px; color: var(--text-muted); margin-left: 8px;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
 							</div>
 							<span class="badge \${warningClass}">\${statusText}</span>
 						</div>
 						<div class="progress-container">
-							<div class="progress-bar" style="width: \${percentage}%; background: \${account.status === 'error' ? 'var(--danger-color)' : 'var(--primary-gradient)'}"></div>
+							<div class="progress-bar" style="width: \${percentage}%;"></div>
 						</div>
-						<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 4px;">
+						<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
 							<span>今日已用: \${account.usageToday.toLocaleString()} / 10,000 Neurons</span>
 							<span>\${percentage}%</span>
 						</div>
-						\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 6px;">错误信息: \${account.error}</div>\` : ''}
+						\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
 					\`;
 					usageList.appendChild(item);
 
@@ -2590,7 +3003,7 @@ function handleAdminPage(request, env, ctx) {
 				document.getElementById('stat-total-neurons').innerText = totalUsageToday.toLocaleString();
 				document.getElementById('stat-accounts-count').innerText = data.length;
 				
-				const overallPercentage = totalLimit > 0 ? parseFloat(((totalUsageToday / totalLimit) * 100).toFixed(2)) : 0;
+				const overallPercentage = totalLimit > 0 ? Math.min(100, Math.ceil((totalUsageToday / totalLimit) * 100)) : 0;
 				document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
 				document.getElementById('stat-neurons-desc').innerText = \`\${totalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage}%)\`;
 				
@@ -2614,14 +3027,16 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
+		// (No changes to charting, accounts, keys functions)
 		function renderHistoryChart(labels, data) {
 			if (historyChart) historyChart.destroy();
-			
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 			const gridColor = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.05)';
 			const textColor = isLight ? '#64748b' : '#94a3b8';
-
 			const ctx = document.getElementById('historyChart').getContext('2d');
+			const gradient = ctx.createLinearGradient(0, 0, 0, 300);
+			gradient.addColorStop(0, 'rgba(168, 85, 247, 0.35)');
+			gradient.addColorStop(1, 'rgba(168, 85, 247, 0.00)');
 			historyChart = new Chart(ctx, {
 				type: 'line',
 				data: {
@@ -2629,28 +3044,26 @@ function handleAdminPage(request, env, ctx) {
 					datasets: [{
 						label: 'Neuron 消耗数',
 						data: data,
-						borderColor: '#a78bfa',
-						backgroundColor: 'rgba(167, 139, 250, 0.1)',
-						borderWidth: 2,
+						borderColor: '#a855f7',
+						backgroundColor: gradient,
+						borderWidth: 3,
 						tension: 0.3,
-						fill: true
+						fill: true,
+						pointBackgroundColor: '#a855f7',
+						pointBorderColor: 'rgba(255, 255, 255, 0.8)',
+						pointBorderWidth: 1.5,
+						pointRadius: 4,
+						pointHoverRadius: 6,
+						pointHoverBorderWidth: 3
 					}]
 				},
 				options: {
 					responsive: true,
 					maintainAspectRatio: false,
-					plugins: {
-						legend: { display: false }
-					},
+					plugins: { legend: { display: false } },
 					scales: {
-						y: {
-							grid: { color: gridColor },
-							ticks: { color: textColor }
-						},
-						x: {
-							grid: { display: false },
-							ticks: { color: textColor }
-						}
+						y: { grid: { color: gridColor }, ticks: { color: textColor } },
+						x: { grid: { display: false }, ticks: { color: textColor } }
 					}
 				}
 			});
@@ -2658,32 +3071,35 @@ function handleAdminPage(request, env, ctx) {
 
 		function renderModelsChart(labels, data) {
 			if (modelsChart) modelsChart.destroy();
-			
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 			const textColor = isLight ? '#64748b' : '#94a3b8';
-
+			const borderColor = isLight ? '#ffffff' : '#1e293b';
 			const ctx = document.getElementById('modelsChart').getContext('2d');
 			if (labels.length === 0) return;
-
 			modelsChart = new Chart(ctx, {
 				type: 'doughnut',
 				data: {
 					labels: labels.map(l => l.split('/').pop()),
 					datasets: [{
 						data: data,
-						backgroundColor: [
-							'#8b5cf6', '#ec4899', '#10b981', '#f59e0b', '#3b82f6', '#ef4444'
-						],
-						borderWidth: 0
+						backgroundColor: ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'],
+						borderWidth: 2,
+						borderColor: borderColor
 					}]
 				},
 				options: {
 					responsive: true,
 					maintainAspectRatio: false,
+					cutout: '75%',
 					plugins: {
 						legend: {
 							position: 'bottom',
-							labels: { color: textColor, boxWidth: 12 }
+							labels: {
+								color: textColor,
+								boxWidth: 10,
+								padding: 15,
+								font: { size: 11, weight: '500' }
+							}
 						}
 					}
 				}
@@ -2694,36 +3110,30 @@ function handleAdminPage(request, env, ctx) {
 			const el = document.getElementById('proxy-base-url');
 			el.select();
 			document.execCommand('copy');
-			alert('已复制代理基础地址！请将其配置在您软件的 API Base URL 中。');
+			showToast('已复制代理基础地址！');
 		}
 
-		// ------------------------------------------------
-		// 页签：账号管理（增删改查）
-		// ------------------------------------------------
 		async function loadAccounts() {
 			try {
 				const res = await apiFetch('/api/accounts');
 				const accounts = await res.json();
-				
 				const tbody = document.getElementById('accounts-table-body');
 				tbody.innerHTML = '';
-				
 				if (accounts.length === 0) {
-					tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">暂无配置的 Cloudflare 账号</td></tr>';
+					tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 30px;">暂无配置的 Cloudflare 账号</td></tr>';
 					return;
 				}
-
 				accounts.forEach(acc => {
 					const maskedToken = acc.apiToken.length > 8 ? acc.apiToken.substring(0, 4) + '...' + acc.apiToken.substring(acc.apiToken.length - 4) : '********';
 					const tr = document.createElement('tr');
 					tr.innerHTML = \`
-						<td><strong>\${acc.name}</strong></td>
+						<td><strong style="font-weight:600;">\${acc.name}</strong></td>
 						<td><code>\${acc.accountId}</code></td>
 						<td><code>\${maskedToken}</code></td>
 						<td>
 							<div style="display:flex; gap:8px;">
-								<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px;" onclick="editAccount('\${acc.id}', '\${acc.name}', '\${acc.accountId}', '\${acc.apiToken}')">编辑</button>
-								<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteAccount('\${acc.id}')">删除</button>
+								<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px;" onclick="editAccount('\${acc.id}', '\${acc.name}', '\${acc.accountId}', '\${acc.apiToken}')">编辑</button>
+								<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px; color: var(--danger-color);" onclick="deleteAccount('\${acc.id}')">删除</button>
 							</div>
 						</td>
 					\`;
@@ -2762,12 +3172,10 @@ function handleAdminPage(request, env, ctx) {
 			const accountId = document.getElementById('account-id').value;
 			const apiToken = document.getElementById('account-token').value;
 			const id = document.getElementById('account-id-edit').value;
-			
 			const alertEl = document.getElementById('test-result-alert');
 			alertEl.style.display = 'block';
 			alertEl.className = 'badge badge-warning';
 			alertEl.innerText = '测试中...';
-
 			try {
 				const res = await apiFetch('/api/accounts/test', {
 					method: 'POST',
@@ -2778,13 +3186,16 @@ function handleAdminPage(request, env, ctx) {
 				if (data.success) {
 					alertEl.className = 'badge badge-success';
 					alertEl.innerText = '连接成功！API 权限有效';
+					showToast('连接测试成功！');
 				} else {
 					alertEl.className = 'badge badge-danger';
 					alertEl.innerText = '连接失败: ' + data.error;
+					showToast('测试连接失败，请检查 Token 权限', 'error');
 				}
 			} catch (e) {
 				alertEl.className = 'badge badge-danger';
 				alertEl.innerText = '连接超时或异常！';
+				showToast('连接异常，请重试', 'error');
 			}
 		}
 
@@ -2793,23 +3204,21 @@ function handleAdminPage(request, env, ctx) {
 			const name = document.getElementById('account-name').value;
 			const accountId = document.getElementById('account-id').value;
 			const apiToken = document.getElementById('account-token').value;
-
 			if (!accountId || !apiToken) {
-				alert('Account ID 和 API Token 均为必填项！');
+				showToast('Account ID 和 API Token 均为必填项！', 'warning');
 				return;
 			}
-
 			const res = await apiFetch('/api/accounts', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id, name, accountId, apiToken })
 			});
-
 			if (res.ok) {
 				closeAccountModal();
 				loadAccounts();
+				showToast('账号保存成功！');
 			} else {
-				alert('保存失败！');
+				showToast('保存失败！', 'error');
 			}
 		}
 
@@ -2820,42 +3229,41 @@ function handleAdminPage(request, env, ctx) {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id })
 			});
-			if (res.ok) loadAccounts();
+			if (res.ok) {
+				loadAccounts();
+				showToast('账号已成功删除');
+			} else {
+				showToast('删除失败', 'error');
+			}
 		}
 
-		// ------------------------------------------------
-		// 页签：API 密钥管理（增删改查）
-		// ------------------------------------------------
 		async function loadKeys() {
 			try {
 				const res = await apiFetch('/api/keys');
 				const keys = await res.json();
-				
 				const tbody = document.getElementById('keys-table-body');
 				tbody.innerHTML = '';
-				
 				if (keys.length === 0) {
-					tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted);">暂无配置的 API 密钥</td></tr>';
+					tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; color: var(--text-muted); padding: 30px;">暂无配置的 API 密钥</td></tr>';
 					document.getElementById('no-key-warning').classList.remove('hidden');
 					return;
 				} else {
 					document.getElementById('no-key-warning').classList.add('hidden');
 				}
-
 				keys.forEach(k => {
 					const tr = document.createElement('tr');
 					const dateStr = new Date(k.createdAt).toLocaleString();
 					tr.innerHTML = \`
-						<td><strong>\${sen(k.name)}</strong></td>
+						<td><strong style="font-weight:600;">\${sen(k.name)}</strong></td>
 						<td>
 							<div style="display:flex; align-items:center; gap:8px;">
-								<code id="key-val-\${k.id}">\${k.key.substring(0, 10)}...</code>
-								<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px;" onclick="copyKeyText('\${k.key}')">复制</button>
+								<code id="key-val-\${k.id}">\${k.key.length > 6 ? k.key.substring(0, 5) + '...' + k.key.substring(k.key.length - 1) : k.key.substring(0, Math.min(3, k.key.length)) + '...'}</code>
+								<button class="btn btn-secondary" style="padding:4px 8px; font-size:11px; border-radius:6px;" onclick="copyKeyText('\${k.key}')">复制</button>
 							</div>
 						</td>
 						<td>\${dateStr}</td>
 						<td>
-							<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteKey('\${k.id}')">删除</button>
+							<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px; color: var(--danger-color);" onclick="deleteKey('\${k.id}')">删除</button>
 						</td>
 					\`;
 					tbody.appendChild(tr);
@@ -2876,12 +3284,15 @@ function handleAdminPage(request, env, ctx) {
 			input.select();
 			document.execCommand('copy');
 			document.body.removeChild(input);
-			alert('API Key 复制成功！');
+			showToast('API Key 复制成功！');
 		}
 
 		function openAddKeyModal() {
 			document.getElementById('key-name').value = '';
 			document.getElementById('key-val').value = '';
+			document.getElementById('key-modal-title').innerText = '生成新 API 密钥';
+			document.getElementById('key-modal-form').classList.remove('hidden');
+			document.getElementById('key-modal-success').classList.add('hidden');
 			document.getElementById('key-modal').classList.add('active');
 		}
 
@@ -2892,26 +3303,32 @@ function handleAdminPage(request, env, ctx) {
 		async function saveKey() {
 			const name = document.getElementById('key-name').value;
 			const key = document.getElementById('key-val').value;
-			
 			if (!name) {
-				alert('请输入描述名称！');
+				showToast('请输入描述名称！', 'warning');
 				return;
 			}
-
 			const res = await apiFetch('/api/keys', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ name, key })
 			});
-
 			if (res.ok) {
 				const data = await res.json();
-				closeKeyModal();
 				loadKeys();
-				alert('密钥生成成功！\\n请务必复制保存此密钥，关闭后将无法再次完整查看：\\n\\n' + data.key);
+				document.getElementById('key-modal-title').innerText = '密钥已生成';
+				document.getElementById('key-modal-form').classList.add('hidden');
+				document.getElementById('key-modal-success').classList.remove('hidden');
+				document.getElementById('generated-key-val').value = data.key;
 			} else {
-				alert('保存密钥失败！');
+				showToast('保存密钥失败！', 'error');
 			}
+		}
+
+		function copyGeneratedKey() {
+			const el = document.getElementById('generated-key-val');
+			el.select();
+			document.execCommand('copy');
+			showToast('API Key 复制成功！');
 		}
 
 		async function deleteKey(id) {
@@ -2921,40 +3338,47 @@ function handleAdminPage(request, env, ctx) {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ id })
 			});
-			if (res.ok) loadKeys();
+			if (res.ok) {
+				loadKeys();
+				showToast('密钥已成功删除');
+			} else {
+				showToast('删除密钥失败', 'error');
+			}
 		}
 
-		// ------------------------------------------------
-		// 页签：模型设置（自定义模型映射）
-		// ------------------------------------------------
+		function copyModelId(val) {
+			const input = document.createElement('input');
+			input.value = val;
+			document.body.appendChild(input);
+			input.select();
+			document.execCommand('copy');
+			document.body.removeChild(input);
+			showToast(\`已复制模型: \${val}\`);
+		}
+
 		async function loadSettings() {
 			try {
 				const res = await apiFetch('/api/settings');
 				const data = await res.json();
 				customMappings = data.customModelMap || {};
-				
 				const tbody = document.getElementById('mappings-table-body');
 				tbody.innerHTML = '';
-
 				const combined = { ...defaultMappings, ...customMappings };
-				
 				Object.keys(combined).forEach(source => {
 					const target = combined[source];
 					const isCustom = customMappings.hasOwnProperty(source);
 					const typeText = isCustom ? '<span class="badge badge-warning">自定义</span>' : '<span class="badge badge-success">系统默认</span>';
-					
 					const tr = document.createElement('tr');
 					tr.innerHTML = \`
-						<td><code>\${source}</code></td>
-						<td><code>\${target}</code></td>
+						<td><code style="cursor: pointer;" title="点击复制" onclick="copyModelId('\${source}')">\${source}</code></td>
+						<td><code style="cursor: pointer;" title="点击复制" onclick="copyModelId('\${target}')">\${target}</code></td>
 						<td>\${typeText}</td>
 						<td>
-							\${isCustom ? \`<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; color: var(--danger-color);" onclick="deleteMapping('\${source}')">重置</button>\` : '<span style="color: var(--text-muted); font-size:12px;">只读</span>'}
+							\${isCustom ? \`<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px; color: var(--danger-color);" onclick="deleteMapping('\${source}')">重置</button>\` : '<span style="color: var(--text-muted); font-size:12px;">只读</span>'}
 						</td>
 					\`;
 					tbody.appendChild(tr);
 				});
-
 			} catch(e) {
 				console.error(e);
 			}
@@ -2963,44 +3387,39 @@ function handleAdminPage(request, env, ctx) {
 		async function addMapping() {
 			const source = document.getElementById('map-source').value.trim();
 			const target = document.getElementById('map-target').value.trim();
-
 			if (!source || !target) {
-				alert('请求模型名称和目标模型路径不能为空！');
+				showToast('请求模型名称和目标模型路径不能为空！', 'warning');
 				return;
 			}
-
 			customMappings[source] = target;
-			
 			const res = await apiFetch('/api/settings', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ customModelMap: customMappings })
 			});
-
 			if (res.ok) {
 				document.getElementById('map-source').value = '';
 				document.getElementById('map-target').value = '';
 				loadSettings();
+				showToast('映射配置成功！');
 			} else {
-				alert('添加映射失败！');
+				showToast('添加映射失败！', 'error');
 			}
 		}
 
 		async function deleteMapping(source) {
 			if (!confirm('确定要删除此自定义映射并恢复为系统默认吗？')) return;
-			
 			delete customMappings[source];
-
 			const res = await apiFetch('/api/settings', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ customModelMap: customMappings })
 			});
-
 			if (res.ok) {
 				loadSettings();
+				showToast('已重置为默认映射');
 			} else {
-				alert('删除映射失败！');
+				showToast('删除映射失败！', 'error');
 			}
 		}
 	</script>
@@ -3020,70 +3439,150 @@ function handleKVError(request) {
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>KV 绑定异常 - Workers AI to API</title>
-	<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 	<style>
+		:root {
+			--bg-color: #0b0f19;
+			--card-bg: rgba(30, 41, 59, 0.45);
+			--border-color: rgba(239, 68, 68, 0.2);
+			--text-main: #f8fafc;
+			--text-muted: #94a3b8;
+			--primary-gradient: linear-gradient(135deg, #ef4444 0%, #ec4899 100%);
+			--accent-color: #ec4899;
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+			--orb-1-color: rgba(239, 68, 68, 0.08);
+			--orb-2-color: rgba(236, 72, 153, 0.06);
+		}
+
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
 		body {
 			font-family: 'Inter', sans-serif;
-			background-color: #0f172a;
-			color: #f1f5f9;
+			background-color: var(--bg-color);
+			color: var(--text-main);
+			min-height: 100vh;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			min-height: 100vh;
-			margin: 0;
 			padding: 20px;
+			position: relative;
+			overflow: hidden;
 		}
+
+		/* Dynamic Background Orbs */
+		.bg-orbs-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: -1;
+			overflow: hidden;
+			pointer-events: none;
+		}
+
+		.bg-orb {
+			position: absolute;
+			border-radius: 50%;
+			filter: blur(100px);
+			animation: float 25s infinite alternate ease-in-out;
+		}
+
+		.bg-orb-1 {
+			top: -10%;
+			left: -10%;
+			width: 50vw;
+			height: 50vw;
+			background: var(--orb-1-color);
+		}
+
+		.bg-orb-2 {
+			bottom: -10%;
+			right: -10%;
+			width: 60vw;
+			height: 60vw;
+			background: var(--orb-2-color);
+		}
+
+		@keyframes float {
+			0% { transform: translate(0, 0) scale(1); }
+			100% { transform: translate(5%, 5%) scale(1.05); }
+		}
+
 		.error-card {
-			background-color: #1e293b;
-			border: 1px solid rgba(239, 68, 68, 0.2);
-			border-radius: 16px;
+			background-color: var(--card-bg);
+			border: 1px solid var(--border-color);
+			border-radius: 20px;
 			padding: 40px;
 			max-width: 500px;
 			width: 100%;
 			text-align: center;
-			box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			z-index: 10;
 		}
+
 		h1 {
 			font-family: 'Outfit', sans-serif;
 			font-size: 24px;
 			color: #ef4444;
 			margin-bottom: 16px;
+			font-weight: 600;
 		}
+
 		p {
-			color: #94a3b8;
+			color: var(--text-muted);
 			font-size: 15px;
 			line-height: 1.6;
 			margin-bottom: 24px;
 		}
+
 		.code-block {
-			background-color: rgba(0,0,0,0.3);
-			padding: 16px;
-			border-radius: 8px;
+			background-color: rgba(0, 0, 0, 0.25);
+			padding: 20px;
+			border-radius: 12px;
 			font-family: monospace;
 			font-size: 13px;
-			color: #a78bfa;
+			color: #e9d5ff;
 			text-align: left;
-			margin-bottom: 24px;
-			border: 1px solid rgba(255,255,255,0.05);
+			margin-bottom: 26px;
+			border: 1px solid rgba(255, 255, 255, 0.05);
 			line-height: 1.8;
 		}
+
 		.btn {
 			display: inline-block;
-			background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 100%);
+			background: var(--primary-gradient);
 			color: white;
 			text-decoration: none;
-			padding: 12px 24px;
-			border-radius: 8px;
-			font-weight: 500;
+			padding: 12px 28px;
+			border-radius: 10px;
+			font-weight: 600;
 			font-size: 14px;
-			transition: opacity 0.2s;
+			transition: all 0.3s;
+			box-shadow: 0 4px 14px rgba(239, 68, 68, 0.2);
 		}
+
 		.btn:hover {
-			opacity: 0.9;
+			transform: translateY(-2px);
+			box-shadow: 0 6px 20px rgba(239, 68, 68, 0.35);
+			opacity: 0.95;
 		}
 	</style>
 </head>
 <body>
+	<div class="bg-orbs-container">
+		<div class="bg-orb bg-orb-1"></div>
+		<div class="bg-orb bg-orb-2"></div>
+	</div>
 	<div class="error-card">
 		<div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
 		<h1>KV 命名空间未绑定</h1>
@@ -3125,56 +3624,131 @@ function handlePasswordError(request) {
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>管理员密码未配置 - Workers AI to API</title>
-	<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
 	<style>
+		:root {
+			--bg-color: #0b0f19;
+			--card-bg: rgba(30, 41, 59, 0.45);
+			--border-color: rgba(239, 68, 68, 0.2);
+			--text-main: #f8fafc;
+			--text-muted: #94a3b8;
+			--primary-gradient: linear-gradient(135deg, #ef4444 0%, #ec4899 100%);
+			--accent-color: #ec4899;
+			--glass-blur: 20px;
+			--card-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+			--orb-1-color: rgba(239, 68, 68, 0.08);
+			--orb-2-color: rgba(236, 72, 153, 0.06);
+		}
+
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
 		body {
 			font-family: 'Inter', sans-serif;
-			background-color: #0f172a;
-			color: #f1f5f9;
+			background-color: var(--bg-color);
+			color: var(--text-main);
+			min-height: 100vh;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			min-height: 100vh;
-			margin: 0;
 			padding: 20px;
+			position: relative;
+			overflow: hidden;
 		}
+
+		/* Dynamic Background Orbs */
+		.bg-orbs-container {
+			position: fixed;
+			top: 0;
+			left: 0;
+			width: 100%;
+			height: 100%;
+			z-index: -1;
+			overflow: hidden;
+			pointer-events: none;
+		}
+
+		.bg-orb {
+			position: absolute;
+			border-radius: 50%;
+			filter: blur(100px);
+			animation: float 25s infinite alternate ease-in-out;
+		}
+
+		.bg-orb-1 {
+			top: -10%;
+			left: -10%;
+			width: 50vw;
+			height: 50vw;
+			background: var(--orb-1-color);
+		}
+
+		.bg-orb-2 {
+			bottom: -10%;
+			right: -10%;
+			width: 60vw;
+			height: 60vw;
+			background: var(--orb-2-color);
+		}
+
+		@keyframes float {
+			0% { transform: translate(0, 0) scale(1); }
+			100% { transform: translate(5%, 5%) scale(1.05); }
+		}
+
 		.error-card {
-			background-color: #1e293b;
-			border: 1px solid rgba(239, 68, 68, 0.2);
-			border-radius: 16px;
+			background-color: var(--card-bg);
+			border: 1px solid var(--border-color);
+			border-radius: 20px;
 			padding: 40px;
 			max-width: 500px;
 			width: 100%;
 			text-align: center;
-			box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+			box-shadow: var(--card-shadow);
+			backdrop-filter: blur(var(--glass-blur));
+			-webkit-backdrop-filter: blur(var(--glass-blur));
+			z-index: 10;
 		}
+
 		h1 {
 			font-family: 'Outfit', sans-serif;
 			font-size: 24px;
 			color: #ef4444;
 			margin-bottom: 16px;
+			font-weight: 600;
 		}
+
 		p {
-			color: #94a3b8;
+			color: var(--text-muted);
 			font-size: 15px;
 			line-height: 1.6;
 			margin-bottom: 24px;
 		}
+
 		.code-block {
-			background-color: rgba(0,0,0,0.3);
-			padding: 16px;
-			border-radius: 8px;
+			background-color: rgba(0, 0, 0, 0.25);
+			padding: 20px;
+			border-radius: 12px;
 			font-family: monospace;
 			font-size: 13px;
-			color: #a78bfa;
+			color: #e9d5ff;
 			text-align: left;
-			margin-bottom: 24px;
-			border: 1px solid rgba(255,255,255,0.05);
+			margin-bottom: 26px;
+			border: 1px solid rgba(255, 255, 255, 0.05);
 			line-height: 1.8;
 		}
 	</style>
 </head>
 <body>
+	<div class="bg-orbs-container">
+		<div class="bg-orb bg-orb-1"></div>
+		<div class="bg-orb bg-orb-2"></div>
+	</div>
 	<div class="error-card">
 		<div style="font-size: 48px; margin-bottom: 16px;">🔑</div>
 		<h1>管理员密码未配置</h1>
