@@ -40,7 +40,7 @@ export default {
 				headers: {
 					'Access-Control-Allow-Origin': '*',
 					'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, DELETE',
-					'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+					'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key'
 				}
 			});
 		}
@@ -88,7 +88,7 @@ function addCORSHeaders(response) {
 	const newResponse = new Response(response.body, response);
 	newResponse.headers.set('Access-Control-Allow-Origin', '*');
 	newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
-	newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+	newResponse.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key');
 	return newResponse;
 }
 
@@ -226,12 +226,20 @@ async function checkProxyAuth(request, env) {
 		return true; // 没配置任何密钥 = 不校验，谁都能用
 	}
 
-	const authHeader = request.headers.get('Authorization');
-	if (!authHeader || !authHeader.startsWith('Bearer ')) {
-		return false;
+	// 先检查 x-api-key 头
+	const xApiKey = request.headers.get('x-api-key');
+	if (xApiKey && apiKeys.some(k => k.key === xApiKey)) {
+		return true;
 	}
-	const token = authHeader.substring(7);
-	return apiKeys.some(k => k.key === token);
+
+	// 再检查 Authorization: Bearer 头
+	const authHeader = request.headers.get('Authorization');
+	if (authHeader && authHeader.startsWith('Bearer ')) {
+		const token = authHeader.substring(7);
+		return apiKeys.some(k => k.key === token);
+	}
+
+	return false;
 }
 
 // ----------------------------------------------------
@@ -364,6 +372,16 @@ async function handleV1Proxy(request, env, ctx) {
 
 	// 1. 校验调用密钥（API Key）
 	if (!await checkProxyAuth(request, env)) {
+		// /v1/messages 返回 Anthropic 格式错误，其他路径返回 OpenAI 格式
+		if (url.pathname === '/v1/messages') {
+			return new Response(JSON.stringify({
+				type: 'error',
+				error: {
+					type: 'authentication_error',
+					message: 'Invalid x-api-key or Authorization header.'
+				}
+			}), { status: 401, headers: { 'Content-Type': 'application/json' } });
+		}
 		return new Response(JSON.stringify({
 			error: {
 				message: "Incorrect or missing API key. Configure keys in the dashboard.",
@@ -412,6 +430,11 @@ async function handleV1Proxy(request, env, ctx) {
 		return handleCompletions(request, env, url.pathname);
 	}
 
+	// 4. Anthropic Messages API 接口（/v1/messages）
+	if (url.pathname === '/v1/messages' && request.method === 'POST') {
+		return handleMessages(request, env);
+	}
+
 	// 向量嵌入接口
 	if (url.pathname === '/v1/embeddings' && request.method === 'POST') {
 		return handleEmbeddings(request, env);
@@ -420,6 +443,63 @@ async function handleV1Proxy(request, env, ctx) {
 	return new Response(JSON.stringify({
 		error: { message: `Path not found: ${url.pathname}`, type: "invalid_request_error" }
 	}), { status: 404, headers: { 'Content-Type': 'application/json' } });
+}
+
+// ----------------------------------------------------
+// 可复用的核心 API 调用函数
+// 将 OpenAI Chat Completions 格式的请求发送到 Cloudflare AI 网关，
+// 支持多账号负载均衡和故障自动切换。
+// 返回格式：{ success: true, data: cfJson } 或 { success: false, error: "..." }
+// ----------------------------------------------------
+async function callOpenAICompatibleAPI(cfPayload, env, stream) {
+	const accounts = await getAccounts(env);
+	const activeAccounts = accounts.filter(a => a.status === 'active');
+	if (activeAccounts.length === 0) {
+		return { success: false, error: "No active Cloudflare accounts configured. Add them in the WebUI." };
+	}
+
+	const shuffledAccounts = [...activeAccounts].sort(() => Math.random() - 0.5);
+	let lastError = null;
+
+	for (const account of shuffledAccounts) {
+		try {
+			const cfResponse = await fetch(
+				`https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/v1/chat/completions`,
+				{
+					method: 'POST',
+					headers: {
+						'Authorization': `Bearer ${account.apiToken}`,
+						'Content-Type': 'application/json',
+					},
+					body: JSON.stringify(cfPayload),
+				}
+			);
+
+			if (cfResponse.ok) {
+				if (stream) {
+					return { success: true, stream: cfResponse.body };
+				} else {
+					const cfJson = await cfResponse.json();
+					return { success: true, data: cfJson };
+				}
+			} else {
+				const errorText = await cfResponse.text();
+				lastError = `CF API returned ${cfResponse.status}: ${errorText}`;
+			}
+		} catch (e) {
+			lastError = `Connection error: ${e.message}`;
+		}
+	}
+
+	return { success: false, error: `All Cloudflare accounts failed. Last error: ${lastError}` };
+}
+
+// 共享的模型名解析函数：根据用户传入的模型名，映射到 Cloudflare 实际模型
+async function resolveModelName(model, env) {
+	if (model.startsWith('@cf/')) return model;
+	const customMap = await getCustomModelMap(env);
+	const combinedMap = { ...DEFAULT_MODEL_MAP, ...customMap };
+	return combinedMap[model] || '@cf/zai-org/glm-4.7-flash';
 }
 
 // 对话补全 / 文本补全 的代理处理函数
@@ -440,105 +520,654 @@ async function handleCompletions(request, env, pathname) {
 		return new Response(JSON.stringify({ error: { message: "prompt field is required", type: "invalid_request_error" } }), { status: 400 });
 	}
 
-	// 解析模型名映射：把客户端传进来的模型名转成 Cloudflare 上对应的真实模型
-	let cfModel = model;
-	if (!cfModel.startsWith('@cf/')) {
-		const customMap = await getCustomModelMap(env);
-		const combinedMap = { ...DEFAULT_MODEL_MAP, ...customMap };
-		cfModel = combinedMap[model];
-		if (!cfModel) {
-			cfModel = '@cf/zai-org/glm-4.7-flash'; // 找不到映射就用这个默认模型兜底
-		}
-	}
+	// 解析模型名映射
+	const cfModel = await resolveModelName(model, env);
 
-	// 构造发给 Cloudflare 的请求体（走 CF 自带的 OpenAI 兼容接口）
+	// 构造发给 Cloudflare 的请求体
 	const cfPayload = {
 		model: cfModel,
 		messages: pathname === '/v1/chat/completions' ? messages : [{ role: 'user', content: prompt }],
 		stream: !!stream,
 	};
 
-	// 把 OpenAI 标准里的可选参数原样透传过去（包括工具调用的字段）
 	const passthroughFields = [
 		'temperature', 'max_tokens', 'top_p', 'n',
 		'stop', 'presence_penalty', 'frequency_penalty',
 		'logprobs', 'top_logprobs', 'seed', 'user',
-		// 工具调用相关字段 —— Cherry Studio / MCP 这类客户端必须要用
 		'tools', 'tool_choice', 'parallel_tool_calls',
-		// 结构化输出
 		'response_format',
 	];
 	for (const field of passthroughFields) {
 		if (body[field] !== undefined) cfPayload[field] = body[field];
 	}
 
-	// 取出已配置的 Cloudflare 账号
-	const accounts = await getAccounts(env);
-	const activeAccounts = accounts.filter(a => a.status === 'active');
-	if (activeAccounts.length === 0) {
+	const result = await callOpenAICompatibleAPI(cfPayload, env, stream);
+
+	if (!result.success) {
 		return new Response(JSON.stringify({
-			error: { message: "No active Cloudflare accounts configured. Add them in the WebUI.", type: "server_error" }
-		}), { status: 503, headers: { 'Content-Type': 'application/json' } });
+			error: { message: result.error, type: "server_error" }
+		}), { status: 502, headers: { 'Content-Type': 'application/json' } });
 	}
 
-	// 把账号列表随机打乱，实现负载均衡
-	const shuffledAccounts = [...activeAccounts].sort(() => Math.random() - 0.5);
-	let lastError = null;
+	if (stream) {
+		const transformedStream = passthroughStream(result.stream, model);
+		return new Response(transformedStream, {
+			headers: {
+				'Content-Type': 'text/event-stream',
+				'Cache-Control': 'no-cache',
+				'Connection': 'keep-alive',
+				'Transfer-Encoding': 'chunked',
+			},
+		});
+	} else {
+		const cfJson = result.data;
+		if (cfJson.model !== undefined) cfJson.model = model;
+		return new Response(JSON.stringify(cfJson), {
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
+}
 
-	for (const account of shuffledAccounts) {
-		try {
-			// 走 CF 自带的 OpenAI 兼容接口 /ai/v1/chat/completions
-			// 这个接口原生支持 tools/tool_choice，而且返回的就是标准 OpenAI 格式
-			const cfResponse = await fetch(
-				`https://api.cloudflare.com/client/v4/accounts/${account.accountId}/ai/v1/chat/completions`,
-				{
-					method: 'POST',
-					headers: {
-						'Authorization': `Bearer ${account.apiToken}`,
-						'Content-Type': 'application/json',
-					},
-					body: JSON.stringify(cfPayload),
-				}
-			);
+// ----------------------------------------------------
+// Anthropic Messages API → OpenAI Chat Completions 格式转换
+// ----------------------------------------------------
+function convertAnthropicToOpenAI(anthropicBody) {
+	const openaiBody = {};
 
-			if (cfResponse.ok) {
-				if (stream) {
-					// 流式输出：把 CF 返回的 SSE 流直接透传，只改一下模型名
-					const transformedStream = passthroughStream(cfResponse.body, model);
-					return new Response(transformedStream, {
-						headers: {
-							'Content-Type': 'text/event-stream',
-							'Cache-Control': 'no-cache',
-							'Connection': 'keep-alive',
-							'Transfer-Encoding': 'chunked',
-						},
-					});
-				} else {
-					// 非流式：CF 返回的本来就是标准 OpenAI JSON
-					// 直接透传即可 —— 这样 tool_calls、finish_reason、usage 等字段都能完整保留
-					const cfJson = await cfResponse.json();
-					// 只把模型名改回客户端请求时用的那个名字
-					if (cfJson.model !== undefined) cfJson.model = model;
-					return new Response(JSON.stringify(cfJson), {
-						headers: { 'Content-Type': 'application/json' },
-					});
+	// model 直接映射
+	openaiBody.model = anthropicBody.model;
+
+	// max_tokens 直接映射
+	if (anthropicBody.max_tokens !== undefined) {
+		openaiBody.max_tokens = anthropicBody.max_tokens;
+	}
+
+	// stream 直接映射
+	if (anthropicBody.stream !== undefined) {
+		openaiBody.stream = anthropicBody.stream;
+	}
+
+	// temperature 直接映射
+	if (anthropicBody.temperature !== undefined) {
+		openaiBody.temperature = anthropicBody.temperature;
+	}
+
+	// top_p 直接映射
+	if (anthropicBody.top_p !== undefined) {
+		openaiBody.top_p = anthropicBody.top_p;
+	}
+
+	// stop_sequences → stop
+	if (anthropicBody.stop_sequences !== undefined) {
+		openaiBody.stop = anthropicBody.stop_sequences;
+	}
+
+	// 构建 OpenAI 格式的 messages 数组
+	const openaiMessages = [];
+
+	// Anthropic system 字段 → OpenAI system role message (插入到 messages 最前面)
+	if (anthropicBody.system) {
+		let systemContent = '';
+		if (typeof anthropicBody.system === 'string') {
+			systemContent = anthropicBody.system;
+		} else if (Array.isArray(anthropicBody.system)) {
+			// system 为数组格式：[{type: "text", text: "..."}, ...]
+			for (const block of anthropicBody.system) {
+				if (block.type === 'text' && block.text) {
+					systemContent += block.text + '\n';
 				}
-			} else {
-				const errorText = await cfResponse.text();
-				lastError = `CF API returned ${cfResponse.status}: ${errorText}`;
 			}
-		} catch (e) {
-			lastError = `Connection error: ${e.message}`;
+			systemContent = systemContent.trim();
+		}
+		if (systemContent) {
+			openaiMessages.push({ role: 'system', content: systemContent });
 		}
 	}
 
-	// 所有账号都失败了
-	return new Response(JSON.stringify({
-		error: {
-			message: `All Cloudflare accounts failed to process the request. Last error: ${lastError}`,
-			type: "server_error"
+	// 转换 messages
+	for (const msg of anthropicBody.messages) {
+		const role = msg.role;
+		const content = msg.content;
+
+		// Anthropic 的 content 可能是字符串或数组
+		if (typeof content === 'string') {
+			openaiMessages.push({ role, content });
+		} else if (Array.isArray(content)) {
+
+			// assistant 消息：text 和 tool_use 需合并为一条消息（Bug #4）
+			if (role === 'assistant') {
+				let textContent = '';
+				const toolCalls = [];
+
+				for (const block of content) {
+					if (block.type === 'text') {
+						textContent += block.text || '';
+					} else if (block.type === 'tool_use') {
+						toolCalls.push({
+							id: block.id,
+							type: 'function',
+							function: {
+								name: block.name,
+								arguments: JSON.stringify(block.input || {})
+							}
+						});
+					}
+				}
+
+				const assistantMsg = { role: 'assistant', content: textContent || null };
+				if (toolCalls.length > 0) {
+					assistantMsg.tool_calls = toolCalls;
+				}
+				openaiMessages.push(assistantMsg);
+				continue;
+			}
+
+			// user 消息：先处理 tool_result，再处理 text/image（Bug #5）
+			if (role === 'user') {
+				// 先处理 tool_result 块
+				for (const block of content) {
+					if (block.type === 'tool_result') {
+						let resultContent = '';
+						if (typeof block.content === 'string') {
+							resultContent = block.content;
+						} else if (Array.isArray(block.content)) {
+							for (const c of block.content) {
+								if (c.type === 'text' && c.text) {
+									resultContent += c.text;
+								}
+							}
+						}
+						const toolMsg = {
+							role: 'tool',
+							tool_call_id: block.tool_use_id,
+							content: resultContent
+						};
+						if (block.name) toolMsg.name = block.name;
+						openaiMessages.push(toolMsg);
+					}
+				}
+
+				// 再处理剩余的 text 和 image 块
+				const openaiContentParts = [];
+				for (const block of content) {
+					if (block.type === 'text') {
+						openaiContentParts.push({ type: 'text', text: block.text || '' });
+					} else if (block.type === 'image') {
+						// Anthropic image source → OpenAI image_url
+						const source = block.source || {};
+						let imageUrl = '';
+						if (source.type === 'url' && source.url) {
+							// URL 类型图片（Bug #3）
+							imageUrl = source.url;
+						} else if (source.data) {
+							const mediaType = source.media_type || 'image/png';
+							imageUrl = `data:${mediaType};base64,${source.data}`;
+						}
+						if (imageUrl) {
+							openaiContentParts.push({
+								type: 'image_url',
+								image_url: { url: imageUrl }
+							});
+						}
+					}
+				}
+
+				if (openaiContentParts.length > 0) {
+					openaiMessages.push({ role: 'user', content: openaiContentParts });
+				}
+				continue;
+			}
+
+			// 兜底：其他角色只处理 text 块
+			const openaiContentParts = [];
+			for (const block of content) {
+				if (block.type === 'text') {
+					openaiContentParts.push({ type: 'text', text: block.text || '' });
+				}
+			}
+			if (openaiContentParts.length > 0) {
+				openaiMessages.push({ role, content: openaiContentParts });
+			}
 		}
-	}), { status: 502, headers: { 'Content-Type': 'application/json' } });
+	}
+
+	// 确保第一条消息是 user（OpenAI 要求第一条消息必须是 user 或 system）
+	// 如果第一条是 assistant（来自 Anthropic 的多轮 tool calling），在它前面插入一条占位 user 消息
+	const firstNonSystemMsg = openaiMessages.find(m => m.role !== 'system');
+	if (firstNonSystemMsg && firstNonSystemMsg.role === 'assistant') {
+		// 找到 system 消息后的位置，插入一条空的 user 消息
+		const systemCount = openaiMessages.filter(m => m.role === 'system').length;
+		openaiMessages.splice(systemCount, 0, {
+			role: 'user',
+			content: '_'
+		});
+	}
+
+	openaiBody.messages = openaiMessages;
+
+	// tools 字段转换：Anthropic 格式 → OpenAI 格式
+	if (anthropicBody.tools && Array.isArray(anthropicBody.tools)) {
+		openaiBody.tools = anthropicBody.tools.map(tool => ({
+			type: 'function',
+			function: {
+				name: tool.name,
+				description: tool.description || '',
+				parameters: tool.input_schema || {}
+			}
+		}));
+	}
+
+	// tool_choice 转换
+	if (anthropicBody.tool_choice) {
+		const tc = anthropicBody.tool_choice;
+		if (tc.type === 'auto') {
+			openaiBody.tool_choice = 'auto';
+		} else if (tc.type === 'any') {
+			openaiBody.tool_choice = 'required';
+		} else if (tc.type === 'tool' && tc.name) {
+			openaiBody.tool_choice = { type: 'function', function: { name: tc.name } };
+		}
+	}
+
+	return openaiBody;
+}
+
+// ----------------------------------------------------
+// OpenAI Chat Completion 响应 → Anthropic Messages 格式转换
+// ----------------------------------------------------
+function convertOpenAIToAnthropic(openaiResponse, originalModel) {
+	const choice = openaiResponse.choices?.[0] || {};
+	const message = choice.message || {};
+
+	const anthropicResponse = {
+		id: `msg_${crypto.randomUUID()}`,
+		type: 'message',
+		role: 'assistant',
+		content: [],
+		model: originalModel,
+		stop_reason: null,
+		stop_sequence: null,
+		usage: {
+			input_tokens: openaiResponse.usage?.prompt_tokens || 0,
+			output_tokens: openaiResponse.usage?.completion_tokens || 0
+		}
+	};
+
+	// 文本内容 → text block
+	if (message.content) {
+		anthropicResponse.content.push({
+			type: 'text',
+			text: message.content
+		});
+	}
+
+	// tool_calls → tool_use blocks
+	if (message.tool_calls && Array.isArray(message.tool_calls)) {
+		for (const tc of message.tool_calls) {
+			let inputObj = {};
+			try {
+				inputObj = typeof tc.function.arguments === 'string'
+					? JSON.parse(tc.function.arguments)
+					: tc.function.arguments;
+			} catch (_) {
+				inputObj = {};
+			}
+			anthropicResponse.content.push({
+				type: 'tool_use',
+				id: tc.id,
+				name: tc.function.name,
+				input: inputObj
+			});
+		}
+	}
+
+	// finish_reason → stop_reason 映射
+	const finishReason = choice.finish_reason;
+	if (finishReason === 'stop') {
+		anthropicResponse.stop_reason = 'end_turn';
+	} else if (finishReason === 'tool_calls') {
+		anthropicResponse.stop_reason = 'tool_use';
+	} else if (finishReason === 'length') {
+		anthropicResponse.stop_reason = 'max_tokens';
+	} else {
+		anthropicResponse.stop_reason = finishReason || 'end_turn';
+	}
+
+	return anthropicResponse;
+}
+
+// ----------------------------------------------------
+// OpenAI 错误响应 → Anthropic 错误格式转换
+// ----------------------------------------------------
+function convertOpenAIErrorToAnthropic(openaiError, statusCode) {
+	return {
+		type: 'error',
+		error: {
+			type: 'api_error',
+			message: openaiError?.error?.message || openaiError?.message || 'Unknown error'
+		}
+	};
+}
+
+// ----------------------------------------------------
+// Anthropic /v1/messages 路由处理函数
+// ----------------------------------------------------
+async function handleMessages(request, env) {
+	// 认证由 handleV1Proxy 的 checkProxyAuth 统一处理（支持 x-api-key + Bearer）
+
+	// 解析请求体
+	let anthropicBody;
+	try {
+		anthropicBody = await request.json();
+	} catch (e) {
+		return new Response(JSON.stringify({
+			type: 'error',
+			error: { type: 'invalid_request_error', message: 'Invalid JSON body.' }
+		}), { status: 400, headers: { 'Content-Type': 'application/json' } });
+	}
+
+	// 基本参数校验
+	if (!anthropicBody.messages || !Array.isArray(anthropicBody.messages)) {
+		return new Response(JSON.stringify({
+			type: 'error',
+			error: { type: 'invalid_request_error', message: 'messages field is required and must be an array.' }
+		}), { status: 400, headers: { 'Content-Type': 'application/json' } });
+	}
+	if (!anthropicBody.max_tokens) {
+		return new Response(JSON.stringify({
+			type: 'error',
+			error: { type: 'invalid_request_error', message: 'max_tokens is required.' }
+		}), { status: 400, headers: { 'Content-Type': 'application/json' } });
+	}
+
+	// 解析模型名映射
+	const model = anthropicBody.model;
+	const cfModel = await resolveModelName(model, env);
+
+	// Anthropic → OpenAI 格式转换
+	const openaiBody = convertAnthropicToOpenAI(anthropicBody);
+	openaiBody.model = cfModel;
+
+	const stream = !!anthropicBody.stream;
+
+	const result = await callOpenAICompatibleAPI(openaiBody, env, stream);
+
+	if (!result.success) {
+		// 尝试解析 CF 错误详情
+		let errorDetail;
+		try {
+			if (result.error && result.error.includes('CF API returned')) {
+				const match = result.error.match(/CF API returned \d+: (.+)/);
+				if (match) {
+					errorDetail = JSON.parse(match[1]);
+				}
+			}
+		} catch (_) { }
+
+		const anthropicError = convertOpenAIErrorToAnthropic(
+			errorDetail || { message: result.error },
+			502
+		);
+		return new Response(JSON.stringify(anthropicError), {
+			status: 502,
+			headers: { 'Content-Type': 'application/json' }
+		});
+	}
+
+	if (stream) {
+		// 流式：转换流
+		const transformedStream = anthropicStreamTransform(result.stream, model, anthropicBody.messages);
+		return new Response(transformedStream, {
+			headers: {
+				'Content-Type': 'text/event-stream',
+				'Cache-Control': 'no-cache',
+				'Connection': 'keep-alive',
+				'Transfer-Encoding': 'chunked',
+			},
+		});
+	} else {
+		// 非流式：转换响应
+		const openaiResponse = result.data;
+		const anthropicResponse = convertOpenAIToAnthropic(openaiResponse, model);
+		return new Response(JSON.stringify(anthropicResponse), {
+			headers: { 'Content-Type': 'application/json' },
+		});
+	}
+}
+
+// ----------------------------------------------------
+// Anthropic SSE 流式转换
+// 将 OpenAI SSE 格式实时转换为 Anthropic SSE 格式
+// ----------------------------------------------------
+function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
+	const reader = upstreamBody.getReader();
+	const decoder = new TextDecoder();
+	const encoder = new TextEncoder();
+	let buffer = '';
+	let messageId = `msg_${crypto.randomUUID()}`;
+	let contentBlockIndex = -1;  // 首次递增后从 0 开始（Bug #8）
+	let currentToolCallId = null;
+	let currentToolName = null;
+	let currentToolArgs = '';
+	let streamStarted = false;
+	let blockStopSent = false;  // 跟踪最后一个 content block 是否已发送 stop（Bug #2）
+	let inputTokens = 0;
+	let outputTokens = 0;
+
+	return new ReadableStream({
+		async pull(controller) {
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done) {
+					if (buffer.trim()) {
+						buffer = processLines(buffer, controller);
+					}
+					controller.close();
+					break;
+				}
+
+				buffer += decoder.decode(value, { stream: true });
+				buffer = processLines(buffer, controller);
+
+				if (buffer.indexOf('\n') === -1) {
+					break;
+				}
+			}
+		},
+		cancel() {
+			reader.cancel();
+		},
+	});
+
+	function processLines(data, controller) {
+		const lines = data.split('\n');
+		const remaining = lines.pop();
+
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+
+			if (trimmed.startsWith('data: ')) {
+				const dataStr = trimmed.slice(6);
+				if (dataStr === '[DONE]') {
+					// 发送最终事件
+					sendFinalEvent(controller);
+					continue;
+				}
+
+				try {
+					const chunk = JSON.parse(dataStr);
+					const choice = chunk.choices?.[0];
+					if (!choice) continue;
+
+					const delta = choice.delta || {};
+
+					// 更新 usage
+					if (chunk.usage) {
+						inputTokens = chunk.usage.prompt_tokens || 0;
+						outputTokens = chunk.usage.completion_tokens || 0;
+					}
+
+					// 处理 tool_calls delta
+					if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+						// 首次发送任何数据前先发送 message_start（Bug #1）
+						if (!streamStarted) {
+							sendMessageStart(controller);
+							streamStarted = true;
+						}
+
+						for (const tc of delta.tool_calls) {
+							if (tc.id) {
+								// 新的 tool_call 开始
+								if (currentToolCallId) {
+									// 先结束上一个
+									sendContentBlockStop(controller);
+									blockStopSent = true;
+								}
+								currentToolCallId = tc.id;
+								currentToolName = tc.function?.name || '';
+								currentToolArgs = '';
+								contentBlockIndex++;
+								blockStopSent = false;
+
+								sendContentBlockStart(controller, 'tool_use');
+							}
+
+							if (tc.function?.arguments) {
+								currentToolArgs += tc.function.arguments;
+								// 发送 tool_use 的 input_json_delta
+								sendToolUseDelta(controller, tc.function.arguments);
+							}
+						}
+					} else if (delta.content) {
+						// 文本内容 delta
+						if (!streamStarted) {
+							sendMessageStart(controller);
+							sendContentBlockStart(controller, 'text');
+							streamStarted = true;
+							contentBlockIndex++;
+							blockStopSent = false;
+						}
+
+						// 如果之前有 tool_call 在进行中，先结束
+						if (currentToolCallId) {
+							sendContentBlockStop(controller);
+							blockStopSent = true;
+							currentToolCallId = null;
+							currentToolName = null;
+							currentToolArgs = '';
+
+							// 开始新的 text block
+							sendContentBlockStart(controller, 'text');
+							contentBlockIndex++;
+							blockStopSent = false;
+						}
+
+						sendTextDelta(controller, delta.content);
+					}
+
+					// 检查 finish_reason
+					if (choice.finish_reason) {
+						if (currentToolCallId && currentToolArgs) {
+							// 发送最终的 tool_use input
+							sendToolUseFinalInput(controller);
+						}
+					}
+				} catch (_) {
+					// 忽略解析错误
+				}
+			}
+		}
+		return remaining;
+	}
+
+	function sendMessageStart(controller) {
+		const event = {
+			type: 'message_start',
+			message: {
+				id: messageId,
+				type: 'message',
+				role: 'assistant',
+				content: [],
+				model: modelName,
+				stop_reason: null,
+				stop_sequence: null,
+				usage: { input_tokens: inputTokens, output_tokens: outputTokens }
+			}
+		};
+		controller.enqueue(encoder.encode(`event: message_start\ndata: ${JSON.stringify(event)}\n\n`));
+	}
+
+	function sendContentBlockStart(controller, blockType) {
+		const event = {
+			type: 'content_block_start',
+			index: contentBlockIndex,
+			content_block: blockType === 'tool_use'
+				? { type: 'tool_use', id: currentToolCallId, name: currentToolName, input: {} }
+				: { type: 'text', text: '' }
+		};
+		controller.enqueue(encoder.encode(`event: content_block_start\ndata: ${JSON.stringify(event)}\n\n`));
+	}
+
+	function sendTextDelta(controller, text) {
+		const event = {
+			type: 'content_block_delta',
+			index: contentBlockIndex,
+			delta: { type: 'text_delta', text }
+		};
+		controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify(event)}\n\n`));
+	}
+
+	function sendToolUseDelta(controller, argsDelta) {
+		const event = {
+			type: 'content_block_delta',
+			index: contentBlockIndex,
+			delta: { type: 'input_json_delta', partial_json: argsDelta }
+		};
+		controller.enqueue(encoder.encode(`event: content_block_delta\ndata: ${JSON.stringify(event)}\n\n`));
+	}
+
+	function sendToolUseFinalInput(controller) {
+		// 发送最终的 content_block_stop
+		controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({
+			type: 'content_block_stop',
+			index: contentBlockIndex
+		})}\n\n`));
+		blockStopSent = true;
+	}
+
+	function sendContentBlockStop(controller) {
+		controller.enqueue(encoder.encode(`event: content_block_stop\ndata: ${JSON.stringify({
+			type: 'content_block_stop',
+			index: contentBlockIndex
+		})}\n\n`));
+	}
+
+	function sendFinalEvent(controller) {
+		// 如果 finish_reason 触发时已发送过 content_block_stop，跳过重复发送（Bug #2）
+		if (!blockStopSent) {
+			sendContentBlockStop(controller);
+		}
+
+		let stopReason = 'end_turn';
+		if (currentToolCallId) {
+			stopReason = 'tool_use';
+		}
+
+		const event = {
+			type: 'message_delta',
+			delta: {
+				stop_reason: stopReason,
+				stop_sequence: null
+			},
+			usage: { output_tokens: outputTokens || 0 }
+		};
+		controller.enqueue(encoder.encode(`event: message_delta\ndata: ${JSON.stringify(event)}\n\n`));
+
+		controller.enqueue(encoder.encode(`event: message_stop\ndata: ${JSON.stringify({
+			type: 'message_stop'
+		})}\n\n`));
+	}
 }
 
 // 向量嵌入（Embeddings）的代理处理函数
@@ -2576,7 +3205,7 @@ function handleAdminPage(request, env, ctx) {
 								</svg>
 							</div>
 							<div class="stat-value" id="stat-keys-count">0</div>
-							<div class="stat-desc">已配额 of 第三方调用 Key数</div>
+							<div class="stat-desc">已配额调用 Key数</div>
 						</div>
 						<div class="stat-card">
 							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -3779,7 +4408,7 @@ function handlePasswordError(request) {
 				message: "ADMIN_PASSWORD environment variable is missing. Please add the ADMIN_PASSWORD variable to your Worker/Pages settings.",
 				type: "server_error"
 			}
-		}), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' } });
+		}), { status: 500, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-api-key' } });
 	}
 
 	return new Response(html, {
