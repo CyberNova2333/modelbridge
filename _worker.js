@@ -2576,7 +2576,7 @@ async function handleLandingPage(request, env, ctx) {
 					</div>
 					<!-- Right column: Legend list -->
 					<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; align-self: stretch; height: 190px;">
-						<div id="public-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: 180px; overflow-y: auto; padding-right: 4px;"></div>
+						<div id="public-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 180px; overflow-y: auto; padding-right: 4px;"></div>
 					</div>
 				</div>
 				
@@ -3797,6 +3797,54 @@ function handleAdminPage(request, env, ctx) {
 				font-weight: 500;
 			}
 		}
+
+		.public-chart-wrapper {
+			position: relative;
+			height: 190px;
+			width: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 40px;
+			overflow: hidden;
+		}
+
+		.public-chart-wrapper canvas {
+			max-width: 100% !important;
+		}
+
+		#admin-chart-legend {
+			scrollbar-width: none;
+			-ms-overflow-style: none;
+		}
+		#admin-chart-legend::-webkit-scrollbar {
+			display: none;
+		}
+
+		@media (max-width: 768px) {
+			.public-chart-wrapper {
+				flex-direction: column !important;
+				height: auto !important;
+				padding: 10px 0;
+				gap: 20px !important;
+			}
+			.public-chart-wrapper > div:first-child {
+				width: 160px !important;
+				height: 160px !important;
+			}
+			.public-chart-wrapper > div:nth-child(2) {
+				width: 100% !important;
+				height: auto !important;
+				align-items: center !important;
+			}
+			#admin-chart-legend {
+				width: 100%;
+				display: grid !important;
+				grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+				gap: 8px !important;
+				max-height: none !important;
+			}
+		}
 	</style>
 </head>
 <body>
@@ -3938,8 +3986,23 @@ function handleAdminPage(request, env, ctx) {
 						</div>
 						<div class="section-card">
 							<div class="section-title">今日模型消耗占比</div>
-							<div class="chart-container">
-								<canvas id="modelsChart"></canvas>
+							<div class="chart-container public-chart-wrapper" id="admin-chart-wrapper" style="display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 30px; height: 300px; padding: 10px 0;">
+								<!-- Left: Chart -->
+								<div id="admin-canvas-wrapper" style="position: relative; height: 220px; width: 220px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+									<canvas id="modelsChart"></canvas>
+								</div>
+								<!-- Right: Legend -->
+								<div id="admin-legend-wrapper" style="flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; align-self: stretch; height: 100%;">
+									<div id="admin-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0; max-height: 260px; overflow-y: auto; padding-right: 4px;"></div>
+								</div>
+								<!-- Empty Placeholder -->
+								<div id="admin-chart-placeholder" style="display: none; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; color: var(--text-muted); font-size: 13px; gap: 12px; margin: auto;">
+									<svg style="width: 32px; height: 32px; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path>
+									</svg>
+									<span>今日暂无消耗数据</span>
+								</div>
 							</div>
 						</div>
 					</div>
@@ -4529,17 +4592,46 @@ function handleAdminPage(request, env, ctx) {
 
 		function renderModelsChart(labels, data) {
 			if (modelsChart) modelsChart.destroy();
+			
+			const legendContainer = document.getElementById('admin-chart-legend');
+			const canvasWrapper = document.getElementById('admin-canvas-wrapper');
+			const legendWrapper = document.getElementById('admin-legend-wrapper');
+			const placeholder = document.getElementById('admin-chart-placeholder');
+
+			if (legendContainer) legendContainer.innerHTML = '';
+
+			if (labels.length === 0) {
+				if (canvasWrapper) canvasWrapper.style.display = 'none';
+				if (legendWrapper) legendWrapper.style.display = 'none';
+				if (placeholder) placeholder.style.display = 'flex';
+				return;
+			} else {
+				if (canvasWrapper) canvasWrapper.style.display = 'flex';
+				if (legendWrapper) legendWrapper.style.display = 'flex';
+				if (placeholder) placeholder.style.display = 'none';
+			}
+
+			// Sort the model data descending by neurons
+			const combined = labels.map((label, idx) => ({
+				fullLabel: label,
+				cleanLabel: label.split('/').pop(),
+				value: data[idx]
+			})).sort((a, b) => b.value - a.value);
+
+			const sortedLabels = combined.map(x => x.cleanLabel);
+			const sortedData = combined.map(x => x.value);
+
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 			const textColor = isLight ? '#64748b' : '#94a3b8';
 			const borderColor = isLight ? '#ffffff' : '#1e293b';
 			const ctx = document.getElementById('modelsChart').getContext('2d');
-			if (labels.length === 0) return;
+			
 			modelsChart = new Chart(ctx, {
 				type: 'doughnut',
 				data: {
-					labels: labels.map(l => l.split('/').pop()),
+					labels: sortedLabels,
 					datasets: [{
-						data: data,
+						data: sortedData,
 						backgroundColor: ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'],
 						borderWidth: 2,
 						borderColor: borderColor
@@ -4548,20 +4640,56 @@ function handleAdminPage(request, env, ctx) {
 				options: {
 					responsive: true,
 					maintainAspectRatio: false,
-					cutout: '75%',
+					cutout: '70%',
+					animation: {
+						animateRotate: true,
+						animateScale: true,
+						duration: 1000,
+						easing: 'easeOutQuart'
+					},
 					plugins: {
 						legend: {
-							position: 'bottom',
-							labels: {
-								color: textColor,
-								boxWidth: 10,
-								padding: 15,
-								font: { size: 11, weight: '500' }
-							}
+							display: false // 关闭原生图例，使用 HTML 自定义图例
 						}
 					}
 				}
 			});
+
+			// Render Custom HTML Legend for Admin Page
+			if (legendContainer) {
+				const colors = ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
+				const total = sortedData.reduce((a, b) => a + b, 0);
+				
+				combined.forEach((itemData, index) => {
+					const label = itemData.cleanLabel;
+					const fullLabel = itemData.fullLabel;
+					const val = itemData.value;
+					const color = colors[index % colors.length];
+					const pct = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
+					
+					const item = document.createElement('div');
+					item.style.display = 'flex';
+					item.style.alignItems = 'center';
+					item.style.gap = '8px';
+					item.style.fontSize = '12px';
+					item.style.color = textColor;
+					item.style.opacity = '0';
+					item.style.transform = 'translateX(10px)';
+					item.style.transition = 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+					
+					item.innerHTML = '<span style="width: 8px; height: 8px; border-radius: 50%; background-color: ' + color + '; flex-shrink: 0; margin-right: 2px;"></span>' +
+						'<span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; font-weight: 500;" title="' + fullLabel + '">' + label + '</span>' +
+						'<span style="color: var(--text-muted); font-family: monospace; font-size: 11px; flex-shrink: 0; margin-left: 4px;">' + pct + '%</span>';
+					
+					legendContainer.appendChild(item);
+					
+					// 与环形图同时开始加载，依次淡入滑出
+					setTimeout(() => {
+						item.style.opacity = '1';
+						item.style.transform = 'translateX(0)';
+					}, index * 80);
+				});
+			}
 		}
 
 		async function copyEndpointUrl(url) {
