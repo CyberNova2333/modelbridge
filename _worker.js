@@ -411,17 +411,6 @@ async function handleV1Proxy(request, env, ctx) {
 			};
 		});
 
-		// 把自定义映射里出现的原始 Cloudflare 模型名也一并加进去
-		for (const rawModel of Object.values(customMap)) {
-			if (!modelsData.some(m => m.id === rawModel)) {
-				modelsData.push({
-					id: rawModel,
-					object: 'model',
-					created: 1686935000,
-					owned_by: 'cloudflare'
-				});
-			}
-		}
 
 		return new Response(JSON.stringify({
 			object: 'list',
