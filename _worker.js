@@ -1641,8 +1641,10 @@ async function handleDashboardApi(request, env, ctx) {
 			const accounts = await getAccounts(env);
 			const acc = accounts.find(a => a.id === id);
 			if (acc) {
-				targetAccountId = acc.accountId;
-				targetApiToken = acc.apiToken;
+				if (!targetAccountId) targetAccountId = acc.accountId;
+				if (!targetApiToken || targetApiToken.includes('...') || targetApiToken === '********') {
+					targetApiToken = acc.apiToken;
+				}
 			}
 		}
 
@@ -1650,25 +1652,111 @@ async function handleDashboardApi(request, env, ctx) {
 			return new Response(JSON.stringify({ success: false, error: 'Account info not found' }), { status: 400 });
 		}
 
-		try {
-			const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/google/embeddinggemma-300m`, {
-				method: 'POST',
-				headers: {
-					'Authorization': `Bearer ${targetApiToken}`,
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({ text: ['test'] })
-			});
+		const [readResult, editResult, analyticsResult] = await Promise.all([
+			// 1. Workers AI > Read
+			(async () => {
+				try {
+					const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/models/search?limit=1`, {
+						method: 'GET',
+						headers: {
+							'Authorization': `Bearer ${targetApiToken}`,
+							'Content-Type': 'application/json'
+						}
+					});
+					const data = await res.json();
+					if (res.ok && data.success !== false) {
+						return { success: true };
+					}
+					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+				} catch (e) {
+					return { success: false, error: e.message };
+				}
+			})(),
+			// 2. Workers AI > Edit
+			(async () => {
+				try {
+					const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/google/embeddinggemma-300m`, {
+						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${targetApiToken}`,
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify({ text: ['test'] })
+					});
+					const data = await res.json();
+					if (res.ok && data.success !== false) {
+						return { success: true };
+					}
+					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+				} catch (e) {
+					return { success: false, error: e.message };
+				}
+			})(),
+			// 3. Account Analytics > Read
+			(async () => {
+				try {
+					const query = `
+						query GetAIUsage($accountId: String!, $start: String!) {
+							viewer {
+								accounts(filter: { accountTag: $accountId }) {
+									aiInferenceAdaptiveGroups(
+										filter: { datetime_geq: $start }
+										limit: 1
+									) {
+										count
+									}
+								}
+							}
+						}
+					`;
+					const todayUTC = new Date();
+					todayUTC.setUTCHours(0, 0, 0, 0);
+					const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
 
-			if (response.ok) {
-				return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
-			} else {
-				const errorText = await response.text();
-				return new Response(JSON.stringify({ success: false, error: errorText }), { headers: { 'Content-Type': 'application/json' } });
-			}
-		} catch (e) {
-			return new Response(JSON.stringify({ success: false, error: e.message }), { headers: { 'Content-Type': 'application/json' } });
+					const res = await fetch(`https://api.cloudflare.com/client/v4/graphql`, {
+						method: 'POST',
+						headers: {
+							'Authorization': `Bearer ${targetApiToken}`,
+							'Content-Type': 'application/json'
+						},
+						body: JSON.stringify({
+							query,
+							variables: {
+								accountId: targetAccountId,
+								start: startToday
+							}
+						})
+					});
+					const data = await res.json();
+					if (res.ok && !data.errors && data.data?.viewer?.accounts) {
+						return { success: true };
+					}
+					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+				} catch (e) {
+					return { success: false, error: e.message };
+				}
+			})()
+		]);
+
+		const allSuccess = readResult.success && editResult.success && analyticsResult.success;
+		let overallError = null;
+		if (!allSuccess) {
+			const failedPerms = [];
+			if (!readResult.success) failedPerms.push(`Workers AI > Read (${readResult.error})`);
+			if (!editResult.success) failedPerms.push(`Workers AI > Edit (${editResult.error})`);
+			if (!analyticsResult.success) failedPerms.push(`Account Analytics > Read (${analyticsResult.error})`);
+			overallError = failedPerms.join('; ');
 		}
+
+		return new Response(JSON.stringify({
+			success: allSuccess,
+			error: overallError,
+			permissions: {
+				workersAiRead: readResult,
+				workersAiEdit: editResult,
+				accountAnalyticsRead: analyticsResult
+			}
+		}), { headers: { 'Content-Type': 'application/json' } });
 	}
 
 	// 8. 登录后看到的详细用量统计
@@ -4007,9 +4095,9 @@ function handleAdminPage(request, env, ctx) {
 			<div class="form-group">
 				<label for="account-token">API Token (需要创建并赋予以下 3 个权限):</label>
 				<div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
-					• Workers AI &gt; Read<br>
-					• Workers AI &gt; Edit<br>
-					• Account Analytics &gt; Read
+					• Workers AI &gt; Read <span id="perm-wa-read" style="margin-left: 8px;"></span><br>
+					• Workers AI &gt; Edit <span id="perm-wa-edit" style="margin-left: 8px;"></span><br>
+					• Account Analytics &gt; Read <span id="perm-aa-read" style="margin-left: 8px;"></span>
 				</div>
 				<input type="text" id="account-token" placeholder="CF 账号 API Token (会安全遮蔽保存)">
 			</div>
@@ -4537,6 +4625,9 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('account-id').value = '';
 			document.getElementById('account-token').value = '';
 			document.getElementById('test-result-alert').style.display = 'none';
+			document.getElementById('perm-wa-read').innerHTML = '';
+			document.getElementById('perm-wa-edit').innerHTML = '';
+			document.getElementById('perm-aa-read').innerHTML = '';
 			document.getElementById('account-modal').classList.add('active');
 		}
 
@@ -4551,7 +4642,21 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('account-id').value = accountId;
 			document.getElementById('account-token').value = apiToken;
 			document.getElementById('test-result-alert').style.display = 'none';
+			document.getElementById('perm-wa-read').innerHTML = '';
+			document.getElementById('perm-wa-edit').innerHTML = '';
+			document.getElementById('perm-aa-read').innerHTML = '';
 			document.getElementById('account-modal').classList.add('active');
+		}
+
+		function updatePermissionStatus(elementId, statusObj) {
+			const el = document.getElementById(elementId);
+			if (!el) return;
+			if (statusObj && statusObj.success) {
+				el.innerHTML = '<span style="color: #10b981; font-weight: bold; margin-left: 6px;">✅ 有效</span>';
+			} else {
+				const err = (statusObj && statusObj.error) ? statusObj.error : '测试失败';
+				el.innerHTML = '<span style="color: #ef4444; font-weight: bold; margin-left: 6px;" title="' + err.replace(/"/g, '&quot;') + '">🔴 无效</span>';
+			}
 		}
 
 		async function testConnection() {
@@ -4562,6 +4667,11 @@ function handleAdminPage(request, env, ctx) {
 			alertEl.style.display = 'block';
 			alertEl.className = 'badge badge-warning';
 			alertEl.innerText = '测试中...';
+
+			document.getElementById('perm-wa-read').innerHTML = '';
+			document.getElementById('perm-wa-edit').innerHTML = '';
+			document.getElementById('perm-aa-read').innerHTML = '';
+
 			try {
 				const res = await apiFetch('/api/accounts/test', {
 					method: 'POST',
@@ -4569,13 +4679,18 @@ function handleAdminPage(request, env, ctx) {
 					body: JSON.stringify({ id, accountId, apiToken })
 				});
 				const data = await res.json();
+				if (data.permissions) {
+					updatePermissionStatus('perm-wa-read', data.permissions.workersAiRead);
+					updatePermissionStatus('perm-wa-edit', data.permissions.workersAiEdit);
+					updatePermissionStatus('perm-aa-read', data.permissions.accountAnalyticsRead);
+				}
 				if (data.success) {
 					alertEl.className = 'badge badge-success';
 					alertEl.innerText = '连接成功！API 权限有效';
 					showToast('连接测试成功！');
 				} else {
 					alertEl.className = 'badge badge-danger';
-					alertEl.innerText = '连接失败: ' + data.error;
+					alertEl.innerText = '连接失败: ' + (data.error || '部分权限验证未通过');
 					showToast('测试连接失败，请检查 Token 权限', 'error');
 				}
 			} catch (e) {
