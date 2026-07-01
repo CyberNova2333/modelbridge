@@ -1451,46 +1451,102 @@ async function handleDashboardApi(request, env, ctx) {
 	}
 
 	// 5. 公开的用量汇总（首页未登录时也能看到）
-	if (url.pathname === '/api/usage/summary' && method === 'GET') {
-		const cached = await getCachedSummary(env);
-		if (cached) {
-			return new Response(JSON.stringify(cached), { headers: { 'Content-Type': 'application/json' } });
-		}
-
-		const accounts = await getAccounts(env);
-		if (accounts.length === 0) {
-			return new Response(JSON.stringify({
-				totalNeuronsToday: 0,
-				totalAccounts: 0,
-				totalLimit: 0,
-				usagePercentage: 0
-			}), { headers: { 'Content-Type': 'application/json' } });
-		}
-
-		// 刷新最老数据的20个账号
-		const cacheMap = await refreshAccountsUsage(env, accounts, 20);
-
-		// 计算总量
-		let totalNeuronsToday = 0;
-		accounts.forEach(account => {
-			const cachedItem = cacheMap[account.id];
-			if (cachedItem && cachedItem.usageToday) {
-				totalNeuronsToday += cachedItem.usageToday;
+	if (url.pathname === '/api/usage/summary') {
+		if (method === 'GET') {
+			const cached = await getCachedSummary(env);
+			if (cached) {
+				return new Response(JSON.stringify(cached), { headers: { 'Content-Type': 'application/json' } });
 			}
-		});
 
-		const totalLimit = accounts.length * 10000;
-		const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+			const accounts = await getAccounts(env);
+			if (accounts.length === 0) {
+				return new Response(JSON.stringify({
+					totalNeuronsToday: 0,
+					totalAccounts: 0,
+					totalLimit: 0,
+					usagePercentage: 0,
+					needUpdate: false
+				}), { headers: { 'Content-Type': 'application/json' } });
+			}
 
-		const summary = {
-			totalNeuronsToday,
-			totalAccounts: accounts.length,
-			totalLimit,
-			usagePercentage
-		};
+			// 读取缓存的卡片明细来检查更新时间
+			const cachedDetailsRaw = await env.KV.get('cache_usage_details');
+			let cacheMap = {};
+			if (cachedDetailsRaw) {
+				try {
+					cacheMap = JSON.parse(cachedDetailsRaw) || {};
+				} catch (e) {}
+			}
 
-		await setCachedSummary(env, summary);
-		return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+			// 判断是否有任意一个账号的更新时间超过了 20 分钟 (20 * 60 * 1000)
+			const now = Date.now();
+			const hasOutdated = accounts.some(account => {
+				const lastUpdated = cacheMap[account.id]?.timestamp || 0;
+				return (now - lastUpdated) > 20 * 60 * 1000;
+			});
+
+			// 计算当前缓存中的汇总数据
+			let totalNeuronsToday = 0;
+			accounts.forEach(account => {
+				const cachedItem = cacheMap[account.id];
+				if (cachedItem && cachedItem.usageToday) {
+					totalNeuronsToday += cachedItem.usageToday;
+				}
+			});
+
+			const totalLimit = accounts.length * 10000;
+			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+
+			const summary = {
+				totalNeuronsToday,
+				totalAccounts: accounts.length,
+				totalLimit,
+				usagePercentage,
+				needUpdate: hasOutdated
+			};
+
+			await setCachedSummary(env, summary);
+			return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+		}
+
+		if (method === 'POST') {
+			const accounts = await getAccounts(env);
+			if (accounts.length === 0) {
+				return new Response(JSON.stringify({
+					totalNeuronsToday: 0,
+					totalAccounts: 0,
+					totalLimit: 0,
+					usagePercentage: 0,
+					needUpdate: false
+				}), { headers: { 'Content-Type': 'application/json' } });
+			}
+
+			// 刷新最老数据的 20 个账号
+			const cacheMap = await refreshAccountsUsage(env, accounts, 20);
+
+			// 计算最新总量
+			let totalNeuronsToday = 0;
+			accounts.forEach(account => {
+				const cachedItem = cacheMap[account.id];
+				if (cachedItem && cachedItem.usageToday) {
+					totalNeuronsToday += cachedItem.usageToday;
+				}
+			});
+
+			const totalLimit = accounts.length * 10000;
+			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+
+			const summary = {
+				totalNeuronsToday,
+				totalAccounts: accounts.length,
+				totalLimit,
+				usagePercentage,
+				needUpdate: false
+			};
+
+			await setCachedSummary(env, summary);
+			return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+		}
 	}
 
 	// --------------------------------------------------
@@ -2406,16 +2462,29 @@ async function handleLandingPage(request, env, ctx) {
 				const res = await fetch('/api/usage/summary');
 				const data = await res.json();
 				
-				const percent = Number(data.usagePercentage).toFixed(2);
-				const roundedNeurons = Math.ceil(data.totalNeuronsToday);
-				
-				document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
-				document.getElementById('public-progress').style.width = percent + '%';
-				document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
-				document.getElementById('public-percent-desc').innerText = percent + '%';
+				renderPublicSummary(data);
+
+				// 如果后端认为需要更新，则继续发送 POST 请求触发静默更新并获取最新数据
+				if (data.needUpdate) {
+					const updateRes = await fetch('/api/usage/summary', { method: 'POST' });
+					if (updateRes.ok) {
+						const freshData = await updateRes.json();
+						renderPublicSummary(freshData);
+					}
+				}
 			} catch (e) {
 				console.error(e);
 			}
+		}
+
+		function renderPublicSummary(data) {
+			const percent = Number(data.usagePercentage).toFixed(2);
+			const roundedNeurons = Math.ceil(data.totalNeuronsToday);
+			
+			document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
+			document.getElementById('public-progress').style.width = percent + '%';
+			document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
+			document.getElementById('public-percent-desc').innerText = percent + '%';
 		}
 
 		async function submitLogin() {
