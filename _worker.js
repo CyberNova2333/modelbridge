@@ -2493,7 +2493,7 @@ function handleAdminPage(request, env, ctx) {
 			<div class="nav-menu">
 				<div class="nav-item active" id="menu-overview" onclick="switchTab('overview')">
 					<svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
-					控制台
+					数据看板
 				</div>
 				<div class="nav-item" id="menu-accounts" onclick="switchTab('accounts')">
 					<svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
@@ -2505,7 +2505,7 @@ function handleAdminPage(request, env, ctx) {
 				</div>
 				<div class="nav-item" id="menu-settings" onclick="switchTab('settings')">
 					<svg style="width: 18px; height: 18px;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-					自定义模型映射
+					模型映射
 				</div>
 			</div>
 
@@ -2534,7 +2534,7 @@ function handleAdminPage(request, env, ctx) {
 				<!-- Header -->
 				<header>
 					<div>
-						<h1 style="font-size: 26px; font-weight: 700;" id="view-title">控制台</h1>
+						<h1 style="font-size: 26px; font-weight: 700;" id="view-title">数据看板</h1>
 						<p style="color: var(--text-muted); font-size: 14px; margin-top: 4px;">实时监控 Cloudflare AI 账号及接口 status</p>
 					</div>
 					<div class="user-profile">
@@ -2691,7 +2691,7 @@ function handleAdminPage(request, env, ctx) {
 				<!-- TAB: Settings (Model Mapping) -->
 				<div id="tab-settings" class="tab-content hidden">
 					<div class="section-card">
-						<div class="section-title">自定义模型映射 (Model Mappings)</div>
+						<div class="section-title">模型映射 (Model Mappings)</div>
 						<p style="font-size: 13px; color: var(--text-muted); margin-top: 8px; margin-bottom: 20px; line-height: 1.6;">您可以设置请求中的模型名字（例如 gpt-3.5-turbo）应该被反向代理路由去哪一个具体的 Cloudflare AI 对应模型。若请求的模型以 @cf/ 开头，则默认透传不会经过映射。</p>
 						
 						<div style="display: grid; grid-template-columns: 1fr 1.5fr auto; gap: 15px; background-color: var(--section-item-bg); padding: 20px; border-radius: 12px; border: 1px solid var(--border-color); margin-top: 10px;">
@@ -2913,10 +2913,10 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('tab-' + tabName).classList.remove('hidden');
 
 			const titles = {
-				overview: '控制台',
+				overview: '数据看板',
 				accounts: '账号管理',
 				keys: 'API 密钥',
-				settings: '自定义模型映射'
+				settings: '模型映射'
 			};
 			document.getElementById('view-title').innerText = titles[tabName];
 			document.getElementById('sidebar').classList.remove('active');
