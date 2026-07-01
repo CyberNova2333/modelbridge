@@ -947,8 +947,17 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 	let inputTokens = 0;
 	let outputTokens = 0;
 
+	let enqueuedAny = false;
+
 	return new ReadableStream({
 		async pull(controller) {
+			enqueuedAny = false;
+			const originalEnqueue = controller.enqueue.bind(controller);
+			controller.enqueue = (chunk) => {
+				enqueuedAny = true;
+				originalEnqueue(chunk);
+			};
+
 			while (true) {
 				const { value, done } = await reader.read();
 				if (done) {
@@ -963,7 +972,9 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 				buffer = processLines(buffer, controller);
 
 				if (buffer.indexOf('\n') === -1) {
-					break;
+					if (enqueuedAny) {
+						break;
+					}
 				}
 			}
 		},
@@ -1036,9 +1047,9 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 						// 文本内容 delta
 						if (!streamStarted) {
 							sendMessageStart(controller);
+							contentBlockIndex++;
 							sendContentBlockStart(controller, 'text');
 							streamStarted = true;
-							contentBlockIndex++;
 							blockStopSent = false;
 						}
 
@@ -1051,8 +1062,8 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 							currentToolArgs = '';
 
 							// 开始新的 text block
-							sendContentBlockStart(controller, 'text');
 							contentBlockIndex++;
+							sendContentBlockStart(controller, 'text');
 							blockStopSent = false;
 						}
 
