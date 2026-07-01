@@ -1475,7 +1475,7 @@ async function handleDashboardApi(request, env, ctx) {
 			if (cachedDetailsRaw) {
 				try {
 					cacheMap = JSON.parse(cachedDetailsRaw) || {};
-				} catch (e) {}
+				} catch (e) { }
 			}
 
 			// 判断是否有任意一个账号的更新时间超过了 20 分钟 (20 * 60 * 1000)
@@ -1973,11 +1973,12 @@ async function handleLandingPage(request, env, ctx) {
 
 		.public-chart-wrapper {
 			position: relative;
-			height: 180px;
+			height: 190px;
 			width: 100%;
 			display: flex;
 			align-items: center;
 			justify-content: center;
+			gap: 40px;
 			overflow: hidden;
 		}
 
@@ -1990,8 +1991,73 @@ async function handleLandingPage(request, env, ctx) {
 				grid-template-columns: 1fr !important;
 			}
 			.public-chart-wrapper {
-				height: 320px !important;
+				flex-direction: column !important;
+				height: auto !important;
+				padding: 10px 0;
+				gap: 20px !important;
 			}
+			.public-chart-wrapper > div:first-child {
+				width: 160px !important;
+				height: 160px !important;
+			}
+			.public-chart-wrapper > div:nth-child(2) {
+				width: 100% !important;
+				height: auto !important;
+				align-items: center !important;
+			}
+			#public-chart-legend {
+				width: 100%;
+				display: grid !important;
+				grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+				gap: 8px !important;
+				max-height: none !important;
+			}
+		}
+
+		@keyframes fadeInUp {
+			from {
+				opacity: 0;
+				transform: translateY(24px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+			}
+		}
+
+		.animate-fade-in-up {
+			opacity: 0;
+			animation: fadeInUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+		}
+
+		.delay-1 {
+			animation-delay: 0.15s;
+		}
+
+		.delay-2 {
+			animation-delay: 0.3s;
+		}
+
+		@keyframes spin {
+			to { transform: rotate(360deg); }
+		}
+
+		.spinner {
+			display: inline-block;
+			width: 16px;
+			height: 16px;
+			border: 2px solid rgba(168, 85, 247, 0.2);
+			border-radius: 50%;
+			border-top-color: var(--accent-color);
+			animation: spin 1s linear infinite;
+		}
+
+		#public-chart-legend {
+			scrollbar-width: none;
+			-ms-overflow-style: none;
+		}
+		#public-chart-legend::-webkit-scrollbar {
+			display: none;
 		}
 
 		.login-header {
@@ -2386,14 +2452,14 @@ async function handleLandingPage(request, env, ctx) {
 	</div>
 
 	<div class="dashboard-container">
-		<div class="login-header" style="margin-bottom: 8px;">
+		<div class="login-header animate-fade-in-up" style="margin-bottom: 8px;">
 			<div class="logo-icon">AI</div>
 			<span class="logo-text">Workers AI to API</span>
 		</div>
 
 		<div class="dashboard-grid">
 			<!-- Public stats widget -->
-			<div class="stat-card" style="justify-content: space-between;">
+			<div class="stat-card animate-fade-in-up delay-1" style="justify-content: space-between;">
 				<div>
 					<div class="stat-title" style="margin-bottom: 10px;">今日用量汇总</div>
 					<div style="display: flex; align-items: baseline; gap: 4px;">
@@ -2413,10 +2479,23 @@ async function handleLandingPage(request, env, ctx) {
 				</div>
 			</div>
 			<!-- Public model chart widget -->
-			<div class="stat-card" id="public-models-card" style="display: none; align-items: center; justify-content: center; padding: 24px;">
-				<div class="stat-title" style="align-self: flex-start; margin-bottom: 8px; width: 100%;">模型消耗占比</div>
-				<div class="public-chart-wrapper">
-					<canvas id="publicModelsChart"></canvas>
+			<div class="stat-card animate-fade-in-up delay-2" id="public-models-card" style="padding: 24px; display: flex; flex-direction: column; justify-content: center;">
+				<!-- Chart and custom legend container -->
+				<div class="public-chart-wrapper" id="public-chart-wrapper" style="display: none; height: 190px; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; gap: 40px;">
+					<!-- Left column: Chart (takes full height of wrapper, i.e., 190px) -->
+					<div style="position: relative; height: 190px; width: 190px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+						<canvas id="publicModelsChart"></canvas>
+					</div>
+					<!-- Right column: Legend list -->
+					<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; align-self: stretch; height: 190px;">
+						<div id="public-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: 180px; overflow-y: auto; padding-right: 4px;"></div>
+					</div>
+				</div>
+				
+				<!-- Loading / Empty Placeholder -->
+				<div id="public-chart-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 190px; width: 100%; color: var(--text-muted); font-size: 13px; gap: 12px;">
+					<span class="spinner" style="width: 24px; height: 24px; border-width: 2.5px;"></span>
+					<span>正在载入数据...</span>
 				</div>
 			</div>
 		</div>
@@ -2566,24 +2645,59 @@ async function handleLandingPage(request, env, ctx) {
 			}
 		}
 
+		function animateNumber(id, end, duration = 1200) {
+			const obj = document.getElementById(id);
+			if (!obj) return;
+			let start = parseInt(obj.innerText.replace(/,/g, ''), 10);
+			if (isNaN(start) || start <= 0) {
+				start = end > 100 ? 100 : 0;
+			}
+			const range = end - start;
+			if (range === 0) {
+				obj.innerText = end.toLocaleString();
+				return;
+			}
+			const startTime = performance.now();
+			function update(currentTime) {
+				const elapsed = currentTime - startTime;
+				const progress = Math.min(elapsed / duration, 1);
+				const easeProgress = 1 - Math.pow(2, -10 * progress);
+				const current = Math.ceil(start + range * easeProgress);
+				obj.innerText = current.toLocaleString();
+				if (progress < 1) {
+					requestAnimationFrame(update);
+				} else {
+					obj.innerText = end.toLocaleString();
+				}
+			}
+			requestAnimationFrame(update);
+		}
+
 		function renderPublicSummary(data) {
 			lastPublicSummaryData = data;
 			const percent = Number(data.usagePercentage).toFixed(2);
 			const roundedNeurons = Math.ceil(data.totalNeuronsToday);
 			
-			document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
+			// 触发数字滚动的动效
+			animateNumber('public-neurons', roundedNeurons, 1000);
+			
 			document.getElementById('public-progress').style.width = percent + '%';
 			document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
 			document.getElementById('public-percent-desc').innerText = percent + '%';
 
-			const modelsCard = document.getElementById('public-models-card');
-			const grid = document.querySelector('.dashboard-grid');
+			const wrapper = document.getElementById('public-chart-wrapper');
+			const placeholder = document.getElementById('public-chart-placeholder');
+			const legendContainer = document.getElementById('public-chart-legend');
+
 			if (data.modelsToday && data.modelsToday.length > 0) {
-				modelsCard.style.display = 'block';
-				if (grid) grid.classList.remove('single-col');
-				
-				const labels = data.modelsToday.map(m => m.model.split('/').pop());
-				const chartData = data.modelsToday.map(m => m.neurons);
+				if (wrapper) wrapper.style.display = 'flex';
+				if (placeholder) placeholder.style.display = 'none';
+
+				// 按 Neurons 消耗数从大到小排序
+				const sortedModelsToday = [...data.modelsToday].sort((a, b) => b.neurons - a.neurons);
+
+				const labels = sortedModelsToday.map(m => m.model.split('/').pop());
+				const chartData = sortedModelsToday.map(m => m.neurons);
 				
 				const isLight = document.documentElement.getAttribute('data-theme') === 'light';
 				const textColor = isLight ? '#64748b' : '#94a3b8';
@@ -2593,6 +2707,10 @@ async function handleLandingPage(request, env, ctx) {
 				if (publicModelsChartInstance) {
 					publicModelsChartInstance.destroy();
 				}
+				
+				// 清空旧的 HTML Legend 标签
+				if (legendContainer) legendContainer.innerHTML = '';
+
 				publicModelsChartInstance = new Chart(ctx, {
 					type: 'doughnut',
 					data: {
@@ -2608,23 +2726,62 @@ async function handleLandingPage(request, env, ctx) {
 						responsive: true,
 						maintainAspectRatio: false,
 						cutout: '70%',
+						animation: {
+							animateRotate: true,
+							animateScale: true,
+							duration: 1000,
+							easing: 'easeOutQuart'
+						},
 						plugins: {
 							legend: {
-								position: window.innerWidth < 480 ? 'bottom' : 'right',
-								align: 'center',
-								labels: {
-									color: textColor,
-									boxWidth: 8,
-									padding: 10,
-									font: { size: 10, weight: '500' }
-								}
+								display: false // 关闭原生图例，使用 HTML 图例
 							}
 						}
 					}
 				});
+
+				// 动态且逐个淡入渲染模型说明 ID
+				if (legendContainer) {
+					const colors = ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'];
+					const total = chartData.reduce((a, b) => a + b, 0);
+					
+					labels.forEach((label, index) => {
+						const val = chartData[index];
+						const color = colors[index % colors.length];
+						const pct = total > 0 ? ((val / total) * 100).toFixed(1) : '0.0';
+						
+						const item = document.createElement('div');
+						item.style.display = 'flex';
+						item.style.alignItems = 'center';
+						item.style.gap = '8px';
+						item.style.fontSize = '12px';
+						item.style.color = textColor;
+						item.style.opacity = '0';
+						item.style.transform = 'translateX(10px)';
+						item.style.transition = 'all 0.4s cubic-bezier(0.16, 1, 0.3, 1)';
+						
+						item.innerHTML = '<span style="width: 8px; height: 8px; border-radius: 50%; background-color: ' + color + '; flex-shrink: 0; margin-right: 2px;"></span>' +
+							'<span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; font-weight: 500;" title="' + label + '">' + label + '</span>' +
+							'<span style="color: var(--text-muted); font-family: monospace; font-size: 11px; flex-shrink: 0; margin-left: 4px;">' + pct + '%</span>';
+						
+						legendContainer.appendChild(item);
+						
+						// 与环形图同时开始加载，依次淡入滑出
+						setTimeout(() => {
+							item.style.opacity = '1';
+							item.style.transform = 'translateX(0)';
+						}, index * 80);
+					});
+				}
 			} else {
-				modelsCard.style.display = 'none';
-				if (grid) grid.classList.add('single-col');
+				if (wrapper) wrapper.style.display = 'none';
+				if (placeholder) {
+					placeholder.style.display = 'flex';
+					placeholder.innerHTML = '<svg style="width: 32px; height: 32px; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24">' +
+						'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path>' +
+						'<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path>' +
+						'</svg><span>今日暂无消耗数据</span>';
+				}
 				if (publicModelsChartInstance) {
 					publicModelsChartInstance.destroy();
 					publicModelsChartInstance = null;
