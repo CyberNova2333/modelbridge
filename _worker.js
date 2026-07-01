@@ -881,7 +881,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		try {
-			const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/baai/bge-small-en-v1.5`, {
+			const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/google/embeddinggemma-300m`, {
 				method: 'POST',
 				headers: {
 					'Authorization': `Bearer ${targetApiToken}`,
@@ -1582,7 +1582,7 @@ async function handleLandingPage(request, env, ctx) {
 		<button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
 			<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
 				<circle cx="12" cy="12" r="4" />
-				<path d="M12 2v2M12 20v2M4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+				<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
 			</svg>
 			<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
 				<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
@@ -1621,7 +1621,7 @@ async function handleLandingPage(request, env, ctx) {
 			</div>
 			<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px;">
 				<span id="public-limit-desc">总限额: 0 Neurons</span>
-				<span id="public-percent-desc">0%</span>
+				<span id="public-percent-desc">0.00%</span>
 			</div>
 		</div>
 	</div>
@@ -1749,11 +1749,13 @@ async function handleLandingPage(request, env, ctx) {
 				const res = await fetch('/api/usage/summary');
 				const data = await res.json();
 				
-				const roundedPercent = Math.ceil(data.usagePercentage);
-				document.getElementById('public-neurons').innerText = Number(data.totalNeuronsToday).toLocaleString();
-				document.getElementById('public-progress').style.width = roundedPercent + '%';
+				const percent = Number(data.usagePercentage).toFixed(2);
+				const roundedNeurons = Math.ceil(data.totalNeuronsToday);
+				
+				document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
+				document.getElementById('public-progress').style.width = percent + '%';
 				document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
-				document.getElementById('public-percent-desc').innerText = roundedPercent + '%';
+				document.getElementById('public-percent-desc').innerText = percent + '%';
 			} catch (e) {
 				console.error(e);
 			}
@@ -2511,7 +2513,7 @@ function handleAdminPage(request, env, ctx) {
 				<button class="btn btn-secondary" onclick="toggleTheme()" title="切换日间/夜间模式" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
 					<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
 						<circle cx="12" cy="12" r="4" />
-						<path d="M12 2v2M12 20v2M4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
+						<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
 					</svg>
 					<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
 						<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
@@ -2574,7 +2576,7 @@ function handleAdminPage(request, env, ctx) {
 								</svg>
 							</div>
 							<div class="stat-value" id="stat-keys-count">0</div>
-							<div class="stat-desc">已配额的第三方调用 Key数</div>
+							<div class="stat-desc">已配额 of 第三方调用 Key数</div>
 						</div>
 						<div class="stat-card">
 							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -2741,11 +2743,11 @@ function handleAdminPage(request, env, ctx) {
 				<input type="text" id="account-name" placeholder="请输入备注名">
 			</div>
 			<div class="form-group">
-				<label for="account-id">Account ID</label>
+				<label for="account-id">Cloudflare Account ID</label>
 				<input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面">
 			</div>
 			<div class="form-group">
-				<label for="account-token">API Token (需要创建并赋予以下 3 个权限):</label>
+				<label for="account-token">Workers AI API Token (需要创建并赋予以下 3 个权限):</label>
 				<div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
 					• Workers AI &gt; Read<br>
 					• Workers AI &gt; Edit<br>
@@ -2960,9 +2962,13 @@ function handleAdminPage(request, env, ctx) {
 				data.forEach(account => {
 					totalUsageToday += account.usageToday;
 
-					const percentage = Math.min(100, Math.ceil((account.usageToday / 10000) * 100));
+					// Percentage formatted to 2 decimal places
+					const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
 					const warningClass = account.status === 'error' ? 'badge-danger' : (percentage >= 90 ? 'badge-warning' : 'badge-success');
 					const statusText = account.status === 'error' ? '连接异常' : (percentage >= 100 ? '用尽 (10k)' : '正常运行');
+					
+					// Usage rounded up (Math.ceil)
+					const roundedUsage = Math.ceil(account.usageToday);
 					
 					const item = document.createElement('div');
 					item.className = 'section-card';
@@ -2980,8 +2986,8 @@ function handleAdminPage(request, env, ctx) {
 							<div class="progress-bar" style="width: \${percentage}%;"></div>
 						</div>
 						<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
-							<span>今日已用: \${account.usageToday.toLocaleString()} / 10,000 Neurons</span>
-							<span>\${percentage}%</span>
+							<span>今日已用: \${roundedUsage.toLocaleString()} / 10,000 Neurons</span>
+							<span>\${percentage.toFixed(2)}%</span>
 						</div>
 						\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
 					\`;
@@ -3000,12 +3006,14 @@ function handleAdminPage(request, env, ctx) {
 					}
 				});
 
-				document.getElementById('stat-total-neurons').innerText = totalUsageToday.toLocaleString();
+				// Top stats formatting (Usage rounded up, Percentage 2 decimals)
+				const roundedTotalUsageToday = Math.ceil(totalUsageToday);
+				document.getElementById('stat-total-neurons').innerText = roundedTotalUsageToday.toLocaleString();
 				document.getElementById('stat-accounts-count').innerText = data.length;
 				
-				const overallPercentage = totalLimit > 0 ? Math.min(100, Math.ceil((totalUsageToday / totalLimit) * 100)) : 0;
+				const overallPercentage = totalLimit > 0 ? Math.min(100, Number(((totalUsageToday / totalLimit) * 100).toFixed(2))) : 0;
 				document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
-				document.getElementById('stat-neurons-desc').innerText = \`\${totalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage}%)\`;
+				document.getElementById('stat-neurons-desc').innerText = \`\${roundedTotalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage.toFixed(2)}%)\`;
 				
 				const costSaved = (totalUsageToday / 1000) * 0.011;
 				document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
@@ -3027,7 +3035,6 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
-		// (No changes to charting, accounts, keys functions)
 		function renderHistoryChart(labels, data) {
 			if (historyChart) historyChart.destroy();
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
@@ -3752,7 +3759,7 @@ function handlePasswordError(request) {
 	<div class="error-card">
 		<div style="font-size: 48px; margin-bottom: 16px;">🔑</div>
 		<h1>管理员密码未配置</h1>
-		<p>系统检测到您未在 Cloudflare 平台中为该项目配置 <strong>ADMIN_PASSWORD</strong> 环境变量。为了您的接口和管理后台安全，系统已拦截所有访问，直到密码配置完成。</p>
+		<p>系统检测到您未在 Cloudflare 平台中为该项目配置 <strong>ADMIN_PASSWORD</strong> 环境变量。为了您的接口 and 管理后台安全，系统已拦截所有访问，直到密码配置完成。</p>
 		
 		<div class="code-block">
 			<strong>解决方案：</strong><br>
