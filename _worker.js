@@ -2534,46 +2534,109 @@ function handleAdminPage(request, env, ctx) {
 			display: none !important;
 		}
 
-		/* Tab Content Transition */
+		/* Tab Content Transition — Cyberpunk Terminal Reveal */
 		.tab-content {
 			display: none;
+			position: relative;
 		}
 		.tab-content.active {
 			display: block;
-			animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+			animation: cyberReveal 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
 		}
-		@keyframes fadeSlideIn {
-			from {
+		/* Scanline sweep overlay */
+		.tab-content.active::before {
+			content: '';
+			position: absolute;
+			top: 0;
+			left: 0;
+			right: 0;
+			height: 2px;
+			background: linear-gradient(90deg,
+				transparent 0%,
+				rgba(168, 85, 247, 0.1) 15%,
+				rgba(168, 85, 247, 0.65) 40%,
+				rgba(236, 72, 153, 0.85) 50%,
+				rgba(168, 85, 247, 0.65) 60%,
+				rgba(168, 85, 247, 0.1) 85%,
+				transparent 100%
+			);
+			z-index: 100;
+			pointer-events: none;
+			animation: scanlineDrop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+			box-shadow:
+				0 0 15px rgba(168, 85, 247, 0.45),
+				0 0 40px rgba(99, 102, 241, 0.2);
+		}
+		@keyframes scanlineDrop {
+			0%   { top: 0; opacity: 0; }
+			8%   { opacity: 1; }
+			92%  { opacity: 1; }
+			100% { top: 100%; opacity: 0; }
+		}
+		@keyframes cyberReveal {
+			0% {
 				opacity: 0;
-				transform: translateY(16px);
-				filter: blur(2px);
+				transform: translateY(10px) scale(0.97);
+				filter: brightness(2.5) blur(1px);
 			}
-			to {
+			18% {
+				opacity: 0.35;
+				filter: brightness(1.5) blur(0.3px);
+			}
+			35% {
+				opacity: 0.7;
+				transform: translateY(3px) scale(0.99);
+				filter: brightness(1.15) blur(0);
+			}
+			60% {
+				opacity: 0.9;
+				transform: translateY(1px) scale(1);
+				filter: brightness(1.03);
+			}
+			100% {
 				opacity: 1;
-				transform: translateY(0);
-				filter: blur(0);
+				transform: translateY(0) scale(1);
+				filter: brightness(1);
 			}
 		}
 
-		/* Nav item active underline accent */
+		/* Nav item — flowing gradient border + neon glow */
 		.nav-item::after {
 			content: '';
 			position: absolute;
-			left: 12px;
-			right: 12px;
-			bottom: 4px;
-			height: 1.5px;
-			border-radius: 1px;
-			background: rgba(255,255,255,0.45);
+			left: 0;
+			right: 0;
+			bottom: 0;
+			height: 2px;
+			background: linear-gradient(90deg,
+				#6366f1,
+				#a855f7 20%,
+				#ec4899 50%,
+				#a855f7 80%,
+				#6366f1
+			);
+			background-size: 200% 100%;
 			transform: scaleX(0);
-			transform-origin: left center;
-			transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+			transform-origin: center;
+			transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 		}
 		.nav-item.active::after {
 			transform: scaleX(1);
+			animation: borderFlow 3s linear infinite;
+		}
+		@keyframes borderFlow {
+			0%   { background-position: 200% 0; }
+			100% { background-position: 0% 0; }
 		}
 		:root[data-theme="light"] .nav-item::after {
-			background: rgba(79, 70, 229, 0.5);
+			background: linear-gradient(90deg,
+				#4f46e5,
+				#7c3aed 20%,
+				#db2777 50%,
+				#7c3aed 80%,
+				#4f46e5
+			);
+			background-size: 200% 100%;
 		}
 
 		/* Dynamic Background Orbs */
@@ -2707,7 +2770,10 @@ function handleAdminPage(request, env, ctx) {
 		.nav-item.active {
 			color: white;
 			background: var(--primary-gradient);
-			box-shadow: 0 4px 14px rgba(168, 85, 247, 0.2);
+			box-shadow:
+				0 0 18px rgba(168, 85, 247, 0.35),
+				0 0 40px rgba(99, 102, 241, 0.15),
+				inset 0 1px 0 rgba(255, 255, 255, 0.1);
 		}
 
 		.aside-footer {
@@ -3653,7 +3719,7 @@ function handleAdminPage(request, env, ctx) {
 				anthropicUrlEl.dataset.endpointUrl = anthropicUrl;
 				anthropicUrlEl.textContent = anthropicUrl;
 			}
-			switchTab('overview');
+			loadUsageDetails();
 		};
 
 		function toggleSidebar() {
