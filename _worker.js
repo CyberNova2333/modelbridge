@@ -1607,7 +1607,8 @@ async function handleDashboardApi(request, env, ctx) {
 				error: cached ? cached.error : undefined,
 				usageToday: cached ? cached.usageToday : 0,
 				modelsToday: cached ? cached.modelsToday : [],
-				history: cached ? cached.history : []
+				history: cached ? cached.history : [],
+				lastUpdated: cached ? cached.timestamp : 0
 			};
 		});
 
@@ -3083,6 +3084,21 @@ function handleAdminPage(request, env, ctx) {
 			animation: spinner-border .75s linear infinite;
 		}
 
+		@keyframes flash-green {
+			0% {
+				border-color: rgba(16, 185, 129, 0.8);
+				box-shadow: 0 0 20px rgba(16, 185, 129, 0.35);
+			}
+			100% {
+				border-color: var(--border-color);
+				box-shadow: var(--card-shadow);
+			}
+		}
+
+		.card-update-flash {
+			animation: flash-green 2s cubic-bezier(0.25, 1, 0.5, 1);
+		}
+
 		/* Tables */
 		table {
 			width: 100%;
@@ -3839,6 +3855,15 @@ function handleAdminPage(request, env, ctx) {
 				let modelsToday = {};
 
 				const usageList = document.getElementById('accounts-usage-list');
+
+				// 记录刷新前已有卡片的最后更新时间戳
+				const previousTimestamps = new Map();
+				usageList.querySelectorAll('.section-card').forEach(card => {
+					const id = card.dataset.id;
+					const ts = parseInt(card.dataset.lastUpdated || '0', 10);
+					if (id) previousTimestamps.set(id, ts);
+				});
+
 				usageList.innerHTML = '';
 
 				if (data.length === 0) {
@@ -3858,7 +3883,10 @@ function handleAdminPage(request, env, ctx) {
 					const roundedUsage = Math.ceil(account.usageToday);
 					
 					const item = document.createElement('div');
-					item.className = 'section-card';
+					const isRefreshed = previousTimestamps.has(account.id) && previousTimestamps.get(account.id) !== account.lastUpdated;
+					item.className = 'section-card' + (isRefreshed ? ' card-update-flash' : '');
+					item.dataset.id = account.id;
+					item.dataset.lastUpdated = account.lastUpdated || 0;
 					item.style.padding = '20px';
 					item.style.backgroundColor = 'rgba(255,255,255,0.01)';
 					item.innerHTML = \`
