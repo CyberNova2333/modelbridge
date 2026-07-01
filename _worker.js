@@ -1485,14 +1485,27 @@ async function handleDashboardApi(request, env, ctx) {
 				return (now - lastUpdated) > 20 * 60 * 1000;
 			});
 
-			// 计算当前缓存中的汇总数据
+			// 计算当前缓存中的汇总数据和模型占比
 			let totalNeuronsToday = 0;
+			let modelsToday = {};
 			accounts.forEach(account => {
 				const cachedItem = cacheMap[account.id];
-				if (cachedItem && cachedItem.usageToday) {
-					totalNeuronsToday += cachedItem.usageToday;
+				if (cachedItem) {
+					if (cachedItem.usageToday) {
+						totalNeuronsToday += cachedItem.usageToday;
+					}
+					if (cachedItem.modelsToday) {
+						cachedItem.modelsToday.forEach(m => {
+							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+						});
+					}
 				}
 			});
+
+			const formattedModelsToday = Object.keys(modelsToday).map(model => ({
+				model,
+				neurons: modelsToday[model]
+			}));
 
 			const totalLimit = accounts.length * 10000;
 			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
@@ -1502,6 +1515,7 @@ async function handleDashboardApi(request, env, ctx) {
 				totalAccounts: accounts.length,
 				totalLimit,
 				usagePercentage,
+				modelsToday: formattedModelsToday,
 				needUpdate: hasOutdated
 			};
 
@@ -1517,6 +1531,7 @@ async function handleDashboardApi(request, env, ctx) {
 					totalAccounts: 0,
 					totalLimit: 0,
 					usagePercentage: 0,
+					modelsToday: [],
 					needUpdate: false
 				}), { headers: { 'Content-Type': 'application/json' } });
 			}
@@ -1524,14 +1539,27 @@ async function handleDashboardApi(request, env, ctx) {
 			// 刷新最老数据的 20 个账号
 			const cacheMap = await refreshAccountsUsage(env, accounts, 20);
 
-			// 计算最新总量
+			// 计算最新总量和模型占比
 			let totalNeuronsToday = 0;
+			let modelsToday = {};
 			accounts.forEach(account => {
 				const cachedItem = cacheMap[account.id];
-				if (cachedItem && cachedItem.usageToday) {
-					totalNeuronsToday += cachedItem.usageToday;
+				if (cachedItem) {
+					if (cachedItem.usageToday) {
+						totalNeuronsToday += cachedItem.usageToday;
+					}
+					if (cachedItem.modelsToday) {
+						cachedItem.modelsToday.forEach(m => {
+							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+						});
+					}
 				}
 			});
+
+			const formattedModelsToday = Object.keys(modelsToday).map(model => ({
+				model,
+				neurons: modelsToday[model]
+			}));
 
 			const totalLimit = accounts.length * 10000;
 			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
@@ -1541,6 +1569,7 @@ async function handleDashboardApi(request, env, ctx) {
 				totalAccounts: accounts.length,
 				totalLimit,
 				usagePercentage,
+				modelsToday: formattedModelsToday,
 				needUpdate: false
 			};
 
@@ -1764,6 +1793,7 @@ async function handleLandingPage(request, env, ctx) {
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<style>
 		:root {
 			--bg-color: #0b0f19;
@@ -2337,6 +2367,13 @@ async function handleLandingPage(request, env, ctx) {
 				<span id="public-percent-desc">0.00%</span>
 			</div>
 		</div>
+		<!-- Public model chart widget -->
+		<div class="stat-card" id="public-models-card" style="display: none;">
+			<div class="stat-title" style="margin-bottom: 12px;">今日模型消耗占比</div>
+			<div style="position: relative; height: 180px; width: 100%;">
+				<canvas id="publicModelsChart"></canvas>
+			</div>
+		</div>
 	</div>
 
 	<!-- 弹窗：管理员登录 / 后台快捷入口 -->
@@ -2417,12 +2454,18 @@ async function handleLandingPage(request, env, ctx) {
 			updateThemeIcons();
 		}
 
+		let publicModelsChartInstance = null;
+		let lastPublicSummaryData = null;
+
 		function toggleTheme() {
 			const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
 			const newTheme = currentTheme === 'light' ? 'dark' : 'light';
 			document.documentElement.setAttribute('data-theme', newTheme);
 			localStorage.setItem('theme', newTheme);
 			updateThemeIcons();
+			if (lastPublicSummaryData) {
+				renderPublicSummary(lastPublicSummaryData);
+			}
 		}
 
 		function updateThemeIcons() {
@@ -2478,6 +2521,7 @@ async function handleLandingPage(request, env, ctx) {
 		}
 
 		function renderPublicSummary(data) {
+			lastPublicSummaryData = data;
 			const percent = Number(data.usagePercentage).toFixed(2);
 			const roundedNeurons = Math.ceil(data.totalNeuronsToday);
 			
@@ -2485,6 +2529,57 @@ async function handleLandingPage(request, env, ctx) {
 			document.getElementById('public-progress').style.width = percent + '%';
 			document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
 			document.getElementById('public-percent-desc').innerText = percent + '%';
+
+			const modelsCard = document.getElementById('public-models-card');
+			if (data.modelsToday && data.modelsToday.length > 0) {
+				modelsCard.style.display = 'block';
+				
+				const labels = data.modelsToday.map(m => m.model.split('/').pop());
+				const chartData = data.modelsToday.map(m => m.neurons);
+				
+				const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+				const textColor = isLight ? '#64748b' : '#94a3b8';
+				const borderColor = isLight ? '#ffffff' : '#1e293b';
+				
+				const ctx = document.getElementById('publicModelsChart').getContext('2d');
+				if (publicModelsChartInstance) {
+					publicModelsChartInstance.destroy();
+				}
+				publicModelsChartInstance = new Chart(ctx, {
+					type: 'doughnut',
+					data: {
+						labels: labels,
+						datasets: [{
+							data: chartData,
+							backgroundColor: ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'],
+							borderWidth: 2,
+							borderColor: borderColor
+						}]
+					},
+					options: {
+						responsive: true,
+						maintainAspectRatio: false,
+						cutout: '70%',
+						plugins: {
+							legend: {
+								position: 'bottom',
+								labels: {
+									color: textColor,
+									boxWidth: 8,
+									padding: 10,
+									font: { size: 10, weight: '500' }
+								}
+							}
+						}
+					}
+				});
+			} else {
+				modelsCard.style.display = 'none';
+				if (publicModelsChartInstance) {
+					publicModelsChartInstance.destroy();
+					publicModelsChartInstance = null;
+				}
+			}
 		}
 
 		async function submitLogin() {
