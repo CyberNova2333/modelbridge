@@ -3683,22 +3683,6 @@ function handleAdminPage(request, env, ctx) {
 						</div>
 					</div>
 
-					<!-- Proxy URL Info -->
-					<div class="section-card" style="margin-top: 24px;">
-						<div class="section-title">接入信息</div>
-						<div class="section-note">OpenAI SDK 和 Anthropic Messages 都可直接接入，点击 URL 即可复制。</div>
-						<div class="access-endpoint-grid" style="margin-top: 18px;">
-							<div class="access-endpoint-card">
-								<div class="endpoint-badge">OpenAI 兼容格式</div>
-								<button type="button" class="endpoint-url" id="openai-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/chat/completions</button>
-							</div>
-							<div class="access-endpoint-card">
-								<div class="endpoint-badge">Anthropic 兼容格式</div>
-								<button type="button" class="endpoint-url" id="anthropic-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/messages</button>
-							</div>
-						</div>
-					</div>
-
 					<!-- Charts -->
 					<div class="charts-grid" style="margin-top: 24px;">
 						<div class="section-card">
@@ -3719,7 +3703,10 @@ function handleAdminPage(request, env, ctx) {
 					<div class="section-card" style="margin-top: 24px;">
 						<div class="section-header">
 							<div class="section-title">账号用量明细</div>
-							<button class="btn btn-secondary" id="btn-refresh-usage" onclick="loadUsageDetails()">刷新用量</button>
+							<div style="display: flex; align-items: center; gap: 12px;">
+								<span id="txt-last-updated" style="font-size: 12px; color: var(--text-muted); font-family: monospace;"></span>
+								<button class="btn btn-secondary" id="btn-refresh-usage" onclick="loadUsageDetails(true)">刷新用量</button>
+							</div>
 						</div>
 						<div id="accounts-usage-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
 							<!-- Individual account progress item -->
@@ -3756,6 +3743,22 @@ function handleAdminPage(request, env, ctx) {
 
 				<!-- TAB: API Keys -->
 				<div id="tab-keys" class="tab-content">
+					<!-- Proxy URL Info -->
+					<div class="section-card" style="margin-bottom: 24px;">
+						<div class="section-title">接入信息</div>
+						<div class="section-note">OpenAI SDK 和 Anthropic Messages 都可直接接入，点击 URL 即可复制。</div>
+						<div class="access-endpoint-grid" style="margin-top: 18px;">
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">OpenAI 兼容格式</div>
+								<button type="button" class="endpoint-url" id="openai-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/chat/completions</button>
+							</div>
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">Anthropic 兼容格式</div>
+								<button type="button" class="endpoint-url" id="anthropic-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/messages</button>
+							</div>
+						</div>
+					</div>
+
 					<div class="section-card">
 						<div class="section-header">
 							<div class="section-title">API 密钥管理</div>
@@ -4039,7 +4042,16 @@ function handleAdminPage(request, env, ctx) {
 			renderModelsChart(models, modelsNeurons);
 		}
 
-		async function loadUsageDetails() {
+		let isRefreshingUsage = false;
+
+		async function loadUsageDetails(isManual = false) {
+			// 如果已经在刷新中，则直接返回，避免并发请求
+			if (isRefreshingUsage) return;
+
+			const now = Date.now();
+			const lastFetchedRaw = localStorage.getItem('cache_usage_details_last_fetched');
+			let lastFetched = lastFetchedRaw ? parseInt(lastFetchedRaw, 10) : 0;
+
 			// 优先从浏览器 localStorage 读取并渲染上次缓存的数据
 			const cachedDataRaw = localStorage.getItem('cache_accounts_usage');
 			if (cachedDataRaw) {
@@ -4055,6 +4067,15 @@ function handleAdminPage(request, env, ctx) {
 				document.getElementById('stat-keys-count').innerText = cachedKeysCount;
 			}
 
+			// 更新文字显示
+			updateLastUpdatedText(lastFetched);
+
+			// 如果不是手动刷新，且最后更新时间在 15 分钟以内，则直接使用缓存，不发起 API 请求
+			if (!isManual && lastFetched && (now - lastFetched) < 15 * 60 * 1000) {
+				console.log('Skipping auto refresh, last fetch was ' + Math.round((now - lastFetched) / 1000) + 's ago');
+				return;
+			}
+
 			const btn = document.getElementById('btn-refresh-usage');
 			let originalBtnText = '';
 			if (btn) {
@@ -4062,6 +4083,9 @@ function handleAdminPage(request, env, ctx) {
 				btn.disabled = true;
 				btn.innerHTML = '<span class="spinner"></span> 刷新中...';
 			}
+
+			isRefreshingUsage = true;
+
 			try {
 				const res = await apiFetch('/api/accounts/usage');
 				const data = await res.json();
@@ -4072,6 +4096,10 @@ function handleAdminPage(request, env, ctx) {
 				// 保存/更新本地缓存
 				localStorage.setItem('cache_accounts_usage', JSON.stringify(data));
 
+				// 记录更新时间戳，并更新文字
+				localStorage.setItem('cache_usage_details_last_fetched', now);
+				updateLastUpdatedText(now);
+
 				// 刷新并缓存 API 密钥数
 				const keysRes = await apiFetch('/api/keys');
 				const keys = await keysRes.json();
@@ -4081,11 +4109,29 @@ function handleAdminPage(request, env, ctx) {
 			} catch (e) {
 				console.error(e);
 			} finally {
+				isRefreshingUsage = false;
 				if (btn) {
 					btn.disabled = false;
 					btn.innerHTML = originalBtnText;
 				}
 			}
+		}
+
+		function updateLastUpdatedText(timestamp) {
+			const label = document.getElementById('txt-last-updated');
+			if (!label) return;
+			if (!timestamp) {
+				label.innerText = '从未更新';
+				return;
+			}
+			const date = new Date(timestamp);
+			const yyyy = date.getFullYear();
+			const MM = String(date.getMonth() + 1).padStart(2, '0');
+			const dd = String(date.getDate()).padStart(2, '0');
+			const hh = String(date.getHours()).padStart(2, '0');
+			const mm = String(date.getMinutes()).padStart(2, '0');
+			const ss = String(date.getSeconds()).padStart(2, '0');
+			label.innerText = '最后更新: ' + yyyy + '-' + MM + '-' + dd + ' ' + hh + ':' + mm + ':' + ss;
 		}
 
 		function initTheme() {
