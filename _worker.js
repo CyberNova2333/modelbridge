@@ -4001,11 +4001,11 @@ function handleAdminPage(request, env, ctx) {
 				<input type="text" id="account-name" placeholder="请输入备注名">
 			</div>
 			<div class="form-group">
-				<label for="account-id">Cloudflare Account ID</label>
+				<label for="account-id">Account ID</label>
 				<input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面">
 			</div>
 			<div class="form-group">
-				<label for="account-token">Workers AI API Token (需要创建并赋予以下 3 个权限):</label>
+				<label for="account-token">API Token (需要创建并赋予以下 3 个权限):</label>
 				<div style="font-size: 12px; color: var(--text-muted); background: rgba(0,0,0,0.15); padding: 8px 12px; border-radius: 6px; margin-top: 4px; margin-bottom: 4px; line-height: 1.5; font-family: monospace;">
 					• Workers AI &gt; Read<br>
 					• Workers AI &gt; Edit<br>
