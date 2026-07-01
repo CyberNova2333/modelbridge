@@ -1475,7 +1475,7 @@ async function handleDashboardApi(request, env, ctx) {
 			if (cachedDetailsRaw) {
 				try {
 					cacheMap = JSON.parse(cachedDetailsRaw) || {};
-				} catch (e) {}
+				} catch (e) { }
 			}
 
 			// 判断是否有任意一个账号的更新时间超过了 20 分钟 (20 * 60 * 1000)
@@ -1973,7 +1973,7 @@ async function handleLandingPage(request, env, ctx) {
 
 		.public-chart-wrapper {
 			position: relative;
-			height: 180px;
+			height: 190px;
 			width: 100%;
 			display: flex;
 			align-items: center;
@@ -1991,7 +1991,26 @@ async function handleLandingPage(request, env, ctx) {
 				grid-template-columns: 1fr !important;
 			}
 			.public-chart-wrapper {
-				height: 320px !important;
+				flex-direction: column !important;
+				height: auto !important;
+				padding: 10px 0;
+				gap: 20px !important;
+			}
+			.public-chart-wrapper > div:first-child {
+				width: 160px !important;
+				height: 160px !important;
+			}
+			.public-chart-wrapper > div:nth-child(2) {
+				width: 100% !important;
+				height: auto !important;
+				align-items: center !important;
+			}
+			#public-chart-legend {
+				width: 100%;
+				display: grid !important;
+				grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+				gap: 8px !important;
+				max-height: none !important;
 			}
 		}
 
@@ -2460,19 +2479,21 @@ async function handleLandingPage(request, env, ctx) {
 				</div>
 			</div>
 			<!-- Public model chart widget -->
-			<div class="stat-card animate-fade-in-up delay-2" id="public-models-card" style="padding: 24px; display: flex; flex-direction: column; justify-content: space-between;">
-				<div class="stat-title" style="align-self: flex-start; margin-bottom: 8px; width: 100%;">模型消耗占比</div>
-				
+			<div class="stat-card animate-fade-in-up delay-2" id="public-models-card" style="padding: 24px; display: flex; flex-direction: column; justify-content: center;">
 				<!-- Chart and custom legend container -->
-				<div class="public-chart-wrapper" id="public-chart-wrapper" style="display: none;">
-					<div style="position: relative; height: 180px; width: 180px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
+				<div class="public-chart-wrapper" id="public-chart-wrapper" style="display: none; height: 190px; width: 100%; flex-direction: row; align-items: center; justify-content: space-between; gap: 40px;">
+					<!-- Left column: Chart (takes full height of wrapper, i.e., 190px) -->
+					<div style="position: relative; height: 190px; width: 190px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">
 						<canvas id="publicModelsChart"></canvas>
 					</div>
-					<div id="public-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: 160px; overflow-y: auto; padding-right: 4px;"></div>
+					<!-- Right column: Legend list -->
+					<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; align-self: stretch; height: 190px;">
+						<div id="public-chart-legend" style="flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; max-height: 180px; overflow-y: auto; padding-right: 4px;"></div>
+					</div>
 				</div>
 				
 				<!-- Loading / Empty Placeholder -->
-				<div id="public-chart-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 180px; width: 100%; color: var(--text-muted); font-size: 13px; gap: 12px;">
+				<div id="public-chart-placeholder" style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 190px; width: 100%; color: var(--text-muted); font-size: 13px; gap: 12px;">
 					<span class="spinner" style="width: 24px; height: 24px; border-width: 2.5px;"></span>
 					<span>正在载入数据...</span>
 				</div>
