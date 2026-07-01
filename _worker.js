@@ -3082,6 +3082,7 @@ function handleAdminPage(request, env, ctx) {
 			border-radius: 6px;
 			font-size: 11px;
 			font-weight: 600;
+			white-space: nowrap;
 		}
 
 		.badge-success { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
@@ -3808,12 +3809,12 @@ function handleAdminPage(request, env, ctx) {
 					item.style.padding = '20px';
 					item.style.backgroundColor = 'rgba(255,255,255,0.01)';
 					item.innerHTML = \`
-						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-							<div>
-								<strong style="font-size:15px; font-weight:600;">\${account.name}</strong>
-								<span style="font-size:12px; color: var(--text-muted); margin-left: 8px;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
+						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; gap: 12px;">
+							<div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px;">
+								<strong style="font-size:15px; font-weight:600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;" title="\${account.name}">\${account.name}</strong>
+								<span style="font-size:12px; color: var(--text-muted); font-family: monospace; white-space: nowrap; flex-shrink: 0;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
 							</div>
-							<span class="badge \${warningClass}">\${statusText}</span>
+							<span class="badge \${warningClass}" style="flex-shrink: 0;">\${statusText}</span>
 						</div>
 						<div class="progress-container">
 							<div class="progress-bar" style="width: \${percentage}%;"></div>
