@@ -2534,6 +2534,48 @@ function handleAdminPage(request, env, ctx) {
 			display: none !important;
 		}
 
+		/* Tab Content Transition */
+		.tab-content {
+			display: none;
+		}
+		.tab-content.active {
+			display: block;
+			animation: fadeSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+		}
+		@keyframes fadeSlideIn {
+			from {
+				opacity: 0;
+				transform: translateY(16px);
+				filter: blur(2px);
+			}
+			to {
+				opacity: 1;
+				transform: translateY(0);
+				filter: blur(0);
+			}
+		}
+
+		/* Nav item active underline accent */
+		.nav-item::after {
+			content: '';
+			position: absolute;
+			left: 12px;
+			right: 12px;
+			bottom: 4px;
+			height: 1.5px;
+			border-radius: 1px;
+			background: rgba(255,255,255,0.45);
+			transform: scaleX(0);
+			transform-origin: left center;
+			transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+		}
+		.nav-item.active::after {
+			transform: scaleX(1);
+		}
+		:root[data-theme="light"] .nav-item::after {
+			background: rgba(79, 70, 229, 0.5);
+		}
+
 		/* Dynamic Background Orbs */
 		.bg-orbs-container {
 			position: fixed;
@@ -2652,6 +2694,8 @@ function handleAdminPage(request, env, ctx) {
 			font-weight: 500;
 			color: var(--text-muted);
 			transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+			position: relative;
+			overflow: hidden;
 		}
 
 		.nav-item:hover {
@@ -3249,7 +3293,7 @@ function handleAdminPage(request, env, ctx) {
 				</header>
 
 				<!-- TAB: Overview -->
-				<div id="tab-overview" class="tab-content">
+				<div id="tab-overview" class="tab-content active">
 					<div class="card-grid">
 						<div class="stat-card">
 							<div style="display: flex; justify-content: space-between; align-items: flex-start;">
@@ -3341,7 +3385,7 @@ function handleAdminPage(request, env, ctx) {
 				</div>
 
 				<!-- TAB: Accounts -->
-				<div id="tab-accounts" class="tab-content hidden">
+				<div id="tab-accounts" class="tab-content">
 					<div class="section-card">
 						<div class="section-header">
 							<div class="section-title">账号配置</div>
@@ -3368,7 +3412,7 @@ function handleAdminPage(request, env, ctx) {
 				</div>
 
 				<!-- TAB: API Keys -->
-				<div id="tab-keys" class="tab-content hidden">
+				<div id="tab-keys" class="tab-content">
 					<div class="section-card">
 						<div class="section-header">
 							<div class="section-title">API 密钥管理</div>
@@ -3399,7 +3443,7 @@ function handleAdminPage(request, env, ctx) {
 				</div>
 
 				<!-- TAB: Settings (Model Mapping) -->
-				<div id="tab-settings" class="tab-content hidden">
+				<div id="tab-settings" class="tab-content">
 					<div class="section-card">
 						<div class="section-title">模型映射 (Model Mappings)</div>
 						<p style="font-size: 13px; color: var(--text-muted); margin-top: 8px; margin-bottom: 20px; line-height: 1.6;">您可以设置请求中的模型名字（例如 gpt-3.5-turbo）应该被反向代理路由去哪一个具体的 Cloudflare AI 对应模型。若请求的模型以 @cf/ 开头，则默认透传不会经过映射。</p>
@@ -3627,12 +3671,13 @@ function handleAdminPage(request, env, ctx) {
 		}
 
 		function switchTab(tabName) {
+			if (tabName === currentTab) return;
 			currentTab = tabName;
 			document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
 			document.getElementById('menu-' + tabName).classList.add('active');
 
-			document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-			document.getElementById('tab-' + tabName).classList.remove('hidden');
+			document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+			document.getElementById('tab-' + tabName).classList.add('active');
 
 			const titles = {
 				overview: '数据看板',
