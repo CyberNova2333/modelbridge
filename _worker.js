@@ -270,6 +270,69 @@ async function setCachedSummary(env, summaryData) {
 	await env.KV.put('cache_usage_summary', JSON.stringify(data));
 }
 
+async function refreshAccountsUsage(env, accounts, limit = 20) {
+	const cachedDetailsRaw = await env.KV.get('cache_usage_details');
+	let cacheMap = {};
+	if (cachedDetailsRaw) {
+		try {
+			cacheMap = JSON.parse(cachedDetailsRaw) || {};
+		} catch (e) {
+			cacheMap = {};
+		}
+	}
+
+	// 按最后更新的时间戳升序排序（时间戳为 0 或不存在的最先更新）
+	const sortedAccounts = [...accounts].sort((a, b) => {
+		const tA = cacheMap[a.id]?.timestamp || 0;
+		const tB = cacheMap[b.id]?.timestamp || 0;
+		return tA - tB;
+	});
+
+	const accountsToUpdate = sortedAccounts.slice(0, limit);
+
+	const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+	sevenDaysAgo.setUTCHours(0, 0, 0, 0);
+	const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
+
+	const todayUTC = new Date();
+	todayUTC.setUTCHours(0, 0, 0, 0);
+	const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
+
+	const promises = accountsToUpdate.map(async (account) => {
+		try {
+			const [todayGroups, historyGroups] = await Promise.all([
+				queryGraphQL(account.accountId, account.apiToken, startToday),
+				queryGraphQL(account.accountId, account.apiToken, startSevenDays)
+			]);
+			const todayParsed = processAnalytics(todayGroups);
+			const historyParsed = processAnalytics(historyGroups);
+
+			cacheMap[account.id] = {
+				status: 'active',
+				error: null,
+				usageToday: todayParsed.todayTotalNeurons,
+				modelsToday: todayParsed.todayModels,
+				history: historyParsed.history,
+				timestamp: Date.now()
+			};
+		} catch (e) {
+			console.error(`Error querying GraphQL for ${account.name}:`, e);
+			cacheMap[account.id] = {
+				status: 'error',
+				error: e.message,
+				usageToday: cacheMap[account.id]?.usageToday || 0,
+				modelsToday: cacheMap[account.id]?.modelsToday || [],
+				history: cacheMap[account.id]?.history || [],
+				timestamp: Date.now() // 即使出错也更新时间戳，以便其他账号轮转刷新
+			};
+		}
+	});
+
+	await Promise.all(promises);
+	await env.KV.put('cache_usage_details', JSON.stringify(cacheMap));
+	return cacheMap;
+}
+
 // ----------------------------------------------------
 // Cloudflare GraphQL 用量分析查询
 // ----------------------------------------------------
@@ -1388,57 +1451,131 @@ async function handleDashboardApi(request, env, ctx) {
 	}
 
 	// 5. 公开的用量汇总（首页未登录时也能看到）
-	if (url.pathname === '/api/usage/summary' && method === 'GET') {
-		const cached = await getCachedSummary(env);
-		if (cached) {
-			return new Response(JSON.stringify(cached), { headers: { 'Content-Type': 'application/json' } });
-		}
+	if (url.pathname === '/api/usage/summary') {
+		if (method === 'GET') {
+			const cached = await getCachedSummary(env);
+			if (cached) {
+				return new Response(JSON.stringify(cached), { headers: { 'Content-Type': 'application/json' } });
+			}
 
-		const accounts = await getAccounts(env);
-		if (accounts.length === 0) {
-			return new Response(JSON.stringify({
-				totalNeuronsToday: 0,
-				totalAccounts: 0,
-				totalLimit: 0,
-				usagePercentage: 0
-			}), { headers: { 'Content-Type': 'application/json' } });
-		}
+			const accounts = await getAccounts(env);
+			if (accounts.length === 0) {
+				return new Response(JSON.stringify({
+					totalNeuronsToday: 0,
+					totalAccounts: 0,
+					totalLimit: 0,
+					usagePercentage: 0,
+					needUpdate: false
+				}), { headers: { 'Content-Type': 'application/json' } });
+			}
 
-		const today = new Date();
-		today.setUTCHours(0, 0, 0, 0);
-		const startToday = today.toISOString().split('.')[0] + 'Z';
+			// 读取缓存的卡片明细来检查更新时间
+			const cachedDetailsRaw = await env.KV.get('cache_usage_details');
+			let cacheMap = {};
+			if (cachedDetailsRaw) {
+				try {
+					cacheMap = JSON.parse(cachedDetailsRaw) || {};
+				} catch (e) {}
+			}
 
-		const promises = accounts.map(async (account) => {
-			try {
-				const groups = await queryGraphQL(account.accountId, account.apiToken, startToday);
-				let accountNeurons = 0;
-				const todayStr = new Date().toISOString().split('T')[0];
-				for (const g of groups) {
-					if (g.dimensions.date === todayStr) {
-						accountNeurons += g.sum.totalNeurons || 0;
+			// 判断是否有任意一个账号的更新时间超过了 20 分钟 (20 * 60 * 1000)
+			const now = Date.now();
+			const hasOutdated = accounts.some(account => {
+				const lastUpdated = cacheMap[account.id]?.timestamp || 0;
+				return (now - lastUpdated) > 20 * 60 * 1000;
+			});
+
+			// 计算当前缓存中的汇总数据和模型占比
+			let totalNeuronsToday = 0;
+			let modelsToday = {};
+			accounts.forEach(account => {
+				const cachedItem = cacheMap[account.id];
+				if (cachedItem) {
+					if (cachedItem.usageToday) {
+						totalNeuronsToday += cachedItem.usageToday;
+					}
+					if (cachedItem.modelsToday) {
+						cachedItem.modelsToday.forEach(m => {
+							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+						});
 					}
 				}
-				return accountNeurons;
-			} catch (e) {
-				console.error(`Failed to get usage summary for ${account.name}:`, e);
-				return 0;
+			});
+
+			const formattedModelsToday = Object.keys(modelsToday).map(model => ({
+				model,
+				neurons: modelsToday[model]
+			}));
+
+			const totalLimit = accounts.length * 10000;
+			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+
+			const summary = {
+				totalNeuronsToday,
+				totalAccounts: accounts.length,
+				totalLimit,
+				usagePercentage,
+				modelsToday: formattedModelsToday,
+				needUpdate: hasOutdated
+			};
+
+			await setCachedSummary(env, summary);
+			return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+		}
+
+		if (method === 'POST') {
+			const accounts = await getAccounts(env);
+			if (accounts.length === 0) {
+				return new Response(JSON.stringify({
+					totalNeuronsToday: 0,
+					totalAccounts: 0,
+					totalLimit: 0,
+					usagePercentage: 0,
+					modelsToday: [],
+					needUpdate: false
+				}), { headers: { 'Content-Type': 'application/json' } });
 			}
-		});
 
-		const results = await Promise.all(promises);
-		const totalNeuronsToday = results.reduce((a, b) => a + b, 0);
-		const totalLimit = accounts.length * 10000;
-		const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+			// 刷新最老数据的 20 个账号
+			const cacheMap = await refreshAccountsUsage(env, accounts, 20);
 
-		const summary = {
-			totalNeuronsToday,
-			totalAccounts: accounts.length,
-			totalLimit,
-			usagePercentage
-		};
+			// 计算最新总量和模型占比
+			let totalNeuronsToday = 0;
+			let modelsToday = {};
+			accounts.forEach(account => {
+				const cachedItem = cacheMap[account.id];
+				if (cachedItem) {
+					if (cachedItem.usageToday) {
+						totalNeuronsToday += cachedItem.usageToday;
+					}
+					if (cachedItem.modelsToday) {
+						cachedItem.modelsToday.forEach(m => {
+							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+						});
+					}
+				}
+			});
 
-		await setCachedSummary(env, summary);
-		return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+			const formattedModelsToday = Object.keys(modelsToday).map(model => ({
+				model,
+				neurons: modelsToday[model]
+			}));
+
+			const totalLimit = accounts.length * 10000;
+			const usagePercentage = totalLimit > 0 ? parseFloat(((totalNeuronsToday / totalLimit) * 100).toFixed(2)) : 0;
+
+			const summary = {
+				totalNeuronsToday,
+				totalAccounts: accounts.length,
+				totalLimit,
+				usagePercentage,
+				modelsToday: formattedModelsToday,
+				needUpdate: false
+			};
+
+			await setCachedSummary(env, summary);
+			return new Response(JSON.stringify(summary), { headers: { 'Content-Type': 'application/json' } });
+		}
 	}
 
 	// --------------------------------------------------
@@ -1541,53 +1678,25 @@ async function handleDashboardApi(request, env, ctx) {
 			return new Response(JSON.stringify([]), { headers: { 'Content-Type': 'application/json' } });
 		}
 
-		const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-		sevenDaysAgo.setUTCHours(0, 0, 0, 0);
-		const startSevenDays = sevenDaysAgo.toISOString().split('.')[0] + 'Z';
+		// 刷新最老数据的20个账号
+		const cacheMap = await refreshAccountsUsage(env, accounts, 20);
 
-		// 单独从 UTC 零点开始查今天的数据，避免 7 天数据量太大时
-		// 触发 GraphQL 最多 1000 条的限制，导致今天的数据被截断不全。
-		const todayUTC = new Date();
-		todayUTC.setUTCHours(0, 0, 0, 0);
-		const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
-
-		const promises = accounts.map(async (account) => {
-			try {
-				// 两个查询并行执行：只查今天的用于显示准确当前用量，
-				// 查 7 天的用于画历史趋势图。
-				const [todayGroups, historyGroups] = await Promise.all([
-					queryGraphQL(account.accountId, account.apiToken, startToday),
-					queryGraphQL(account.accountId, account.apiToken, startSevenDays)
-				]);
-				// 今天的数据用「只查今天」的结果（准确，不会被截断）
-				const todayParsed = processAnalytics(todayGroups);
-				// 历史趋势图用「查 7 天」的结果
-				const historyParsed = processAnalytics(historyGroups);
-				return {
-					id: account.id,
-					name: account.name,
-					accountId: account.accountId,
-					status: 'active',
-					usageToday: todayParsed.todayTotalNeurons,
-					modelsToday: todayParsed.todayModels,
-					history: historyParsed.history
-				};
-			} catch (e) {
-				console.error(`Detailed usage fetch error for ${account.name}:`, e);
-				return {
-					id: account.id,
-					name: account.name,
-					accountId: account.accountId,
-					status: 'error',
-					error: e.message,
-					usageToday: 0,
-					modelsToday: [],
-					history: []
-				};
-			}
+		// 构建完整结果列表，若没有缓存数据则标为 pending
+		const results = accounts.map(account => {
+			const cached = cacheMap[account.id];
+			return {
+				id: account.id,
+				name: account.name,
+				accountId: account.accountId,
+				status: cached ? cached.status : 'pending',
+				error: cached ? cached.error : undefined,
+				usageToday: cached ? cached.usageToday : 0,
+				modelsToday: cached ? cached.modelsToday : [],
+				history: cached ? cached.history : [],
+				lastUpdated: cached ? cached.timestamp : 0
+			};
 		});
 
-		const results = await Promise.all(promises);
 		return new Response(JSON.stringify(results), { headers: { 'Content-Type': 'application/json' } });
 	}
 
@@ -1684,6 +1793,7 @@ async function handleLandingPage(request, env, ctx) {
 	<link rel="preconnect" href="https://fonts.googleapis.com">
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+	<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 	<style>
 		:root {
 			--bg-color: #0b0f19;
@@ -1841,13 +1951,47 @@ async function handleLandingPage(request, env, ctx) {
 			box-shadow: 0 8px 20px rgba(168, 85, 247, 0.15);
 		}
 
-		.login-container {
-			max-width: 440px;
+		.dashboard-container {
+			max-width: 900px;
 			width: 100%;
 			display: flex;
 			flex-direction: column;
 			gap: 28px;
 			z-index: 10;
+		}
+
+		.dashboard-grid {
+			display: grid;
+			grid-template-columns: 1fr 2fr;
+			gap: 20px;
+			width: 100%;
+		}
+
+		.dashboard-grid.single-col {
+			grid-template-columns: 1fr;
+		}
+
+		.public-chart-wrapper {
+			position: relative;
+			height: 180px;
+			width: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			overflow: hidden;
+		}
+
+		.public-chart-wrapper canvas {
+			max-width: 100% !important;
+		}
+
+		@media (max-width: 768px) {
+			.dashboard-grid {
+				grid-template-columns: 1fr !important;
+			}
+			.public-chart-wrapper {
+				height: 320px !important;
+			}
 		}
 
 		.login-header {
@@ -1895,6 +2039,8 @@ async function handleLandingPage(request, env, ctx) {
 			backdrop-filter: blur(var(--glass-blur));
 			-webkit-backdrop-filter: blur(var(--glass-blur));
 			transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
+			min-width: 0;
+			overflow: hidden;
 		}
 
 		.stat-card:hover {
@@ -2239,22 +2385,39 @@ async function handleLandingPage(request, env, ctx) {
 		</button>
 	</div>
 
-	<div class="login-container">
-		<div class="login-header">
+	<div class="dashboard-container">
+		<div class="login-header" style="margin-bottom: 8px;">
 			<div class="logo-icon">AI</div>
 			<span class="logo-text">Workers AI to API</span>
 		</div>
 
-		<!-- Public stats widget -->
-		<div class="stat-card">
-			<div class="stat-title">所有账号今日用量汇总</div>
-			<div class="stat-value" id="public-neurons">0</div>
-			<div class="progress-container">
-				<div class="progress-bar" id="public-progress" style="width: 0%;"></div>
+		<div class="dashboard-grid">
+			<!-- Public stats widget -->
+			<div class="stat-card" style="justify-content: space-between;">
+				<div>
+					<div class="stat-title" style="margin-bottom: 10px;">今日用量汇总</div>
+					<div style="display: flex; align-items: baseline; gap: 4px;">
+						<div class="stat-value" id="public-neurons" style="font-size: 42px; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; display: inline-block;">0</div>
+						<span style="font-size: 14px; color: var(--text-muted); font-weight: 500; font-family: 'Outfit', sans-serif;">Neurons</span>
+					</div>
+				</div>
+				
+				<div style="margin-top: 16px;">
+					<div class="progress-container">
+						<div class="progress-bar" id="public-progress" style="width: 0%;"></div>
+					</div>
+					<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+						<span id="public-limit-desc">总限额: 0 Neurons</span>
+						<span id="public-percent-desc" style="font-weight: 600; color: var(--accent-color);">0.00%</span>
+					</div>
+				</div>
 			</div>
-			<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px;">
-				<span id="public-limit-desc">总限额: 0 Neurons</span>
-				<span id="public-percent-desc">0.00%</span>
+			<!-- Public model chart widget -->
+			<div class="stat-card" id="public-models-card" style="display: none; align-items: center; justify-content: center; padding: 24px;">
+				<div class="stat-title" style="align-self: flex-start; margin-bottom: 8px; width: 100%;">模型消耗占比</div>
+				<div class="public-chart-wrapper">
+					<canvas id="publicModelsChart"></canvas>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -2337,12 +2500,18 @@ async function handleLandingPage(request, env, ctx) {
 			updateThemeIcons();
 		}
 
+		let publicModelsChartInstance = null;
+		let lastPublicSummaryData = null;
+
 		function toggleTheme() {
 			const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
 			const newTheme = currentTheme === 'light' ? 'dark' : 'light';
 			document.documentElement.setAttribute('data-theme', newTheme);
 			localStorage.setItem('theme', newTheme);
 			updateThemeIcons();
+			if (lastPublicSummaryData) {
+				renderPublicSummary(lastPublicSummaryData);
+			}
 		}
 
 		function updateThemeIcons() {
@@ -2382,15 +2551,84 @@ async function handleLandingPage(request, env, ctx) {
 				const res = await fetch('/api/usage/summary');
 				const data = await res.json();
 				
-				const percent = Number(data.usagePercentage).toFixed(2);
-				const roundedNeurons = Math.ceil(data.totalNeuronsToday);
-				
-				document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
-				document.getElementById('public-progress').style.width = percent + '%';
-				document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
-				document.getElementById('public-percent-desc').innerText = percent + '%';
+				renderPublicSummary(data);
+
+				// 如果后端认为需要更新，则继续发送 POST 请求触发静默更新并获取最新数据
+				if (data.needUpdate) {
+					const updateRes = await fetch('/api/usage/summary', { method: 'POST' });
+					if (updateRes.ok) {
+						const freshData = await updateRes.json();
+						renderPublicSummary(freshData);
+					}
+				}
 			} catch (e) {
 				console.error(e);
+			}
+		}
+
+		function renderPublicSummary(data) {
+			lastPublicSummaryData = data;
+			const percent = Number(data.usagePercentage).toFixed(2);
+			const roundedNeurons = Math.ceil(data.totalNeuronsToday);
+			
+			document.getElementById('public-neurons').innerText = roundedNeurons.toLocaleString();
+			document.getElementById('public-progress').style.width = percent + '%';
+			document.getElementById('public-limit-desc').innerText = '总限额: ' + Number(data.totalLimit).toLocaleString() + ' Neurons';
+			document.getElementById('public-percent-desc').innerText = percent + '%';
+
+			const modelsCard = document.getElementById('public-models-card');
+			const grid = document.querySelector('.dashboard-grid');
+			if (data.modelsToday && data.modelsToday.length > 0) {
+				modelsCard.style.display = 'block';
+				if (grid) grid.classList.remove('single-col');
+				
+				const labels = data.modelsToday.map(m => m.model.split('/').pop());
+				const chartData = data.modelsToday.map(m => m.neurons);
+				
+				const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+				const textColor = isLight ? '#64748b' : '#94a3b8';
+				const borderColor = isLight ? '#ffffff' : '#1e293b';
+				
+				const ctx = document.getElementById('publicModelsChart').getContext('2d');
+				if (publicModelsChartInstance) {
+					publicModelsChartInstance.destroy();
+				}
+				publicModelsChartInstance = new Chart(ctx, {
+					type: 'doughnut',
+					data: {
+						labels: labels,
+						datasets: [{
+							data: chartData,
+							backgroundColor: ['#6366f1', '#a855f7', '#ec4899', '#10b981', '#f59e0b', '#3b82f6'],
+							borderWidth: 2,
+							borderColor: borderColor
+						}]
+					},
+					options: {
+						responsive: true,
+						maintainAspectRatio: false,
+						cutout: '70%',
+						plugins: {
+							legend: {
+								position: window.innerWidth < 480 ? 'bottom' : 'right',
+								align: 'center',
+								labels: {
+									color: textColor,
+									boxWidth: 8,
+									padding: 10,
+									font: { size: 10, weight: '500' }
+								}
+							}
+						}
+					}
+				});
+			} else {
+				modelsCard.style.display = 'none';
+				if (grid) grid.classList.add('single-col');
+				if (publicModelsChartInstance) {
+					publicModelsChartInstance.destroy();
+					publicModelsChartInstance = null;
+				}
 			}
 		}
 
@@ -3038,6 +3276,43 @@ function handleAdminPage(request, env, ctx) {
 			transform: translateY(-1px);
 		}
 
+		.btn:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+			transform: none !important;
+			box-shadow: none !important;
+		}
+
+		@keyframes spinner-border {
+			to { transform: rotate(360deg); }
+		}
+
+		.spinner {
+			display: inline-block;
+			width: 12px;
+			height: 12px;
+			vertical-align: text-bottom;
+			border: 2px solid currentColor;
+			border-right-color: transparent;
+			border-radius: 50%;
+			animation: spinner-border .75s linear infinite;
+		}
+
+		@keyframes flash-green {
+			0% {
+				border-color: rgba(16, 185, 129, 0.8);
+				box-shadow: 0 0 20px rgba(16, 185, 129, 0.35);
+			}
+			100% {
+				border-color: var(--border-color);
+				box-shadow: var(--card-shadow);
+			}
+		}
+
+		.card-update-flash {
+			animation: flash-green 2s cubic-bezier(0.25, 1, 0.5, 1);
+		}
+
 		/* Tables */
 		table {
 			width: 100%;
@@ -3082,11 +3357,13 @@ function handleAdminPage(request, env, ctx) {
 			border-radius: 6px;
 			font-size: 11px;
 			font-weight: 600;
+			white-space: nowrap;
 		}
 
 		.badge-success { background-color: rgba(16, 185, 129, 0.15); color: #10b981; }
 		.badge-warning { background-color: rgba(245, 158, 11, 0.15); color: #f59e0b; }
 		.badge-danger { background-color: rgba(239, 68, 68, 0.15); color: #ef4444; }
+		.badge-info { background-color: rgba(59, 130, 246, 0.15); color: #3b82f6; }
 
 		/* Charts */
 		.charts-grid {
@@ -3406,22 +3683,6 @@ function handleAdminPage(request, env, ctx) {
 						</div>
 					</div>
 
-					<!-- Proxy URL Info -->
-					<div class="section-card" style="margin-top: 24px;">
-						<div class="section-title">接入信息</div>
-						<div class="section-note">OpenAI SDK 和 Anthropic Messages 都可直接接入，点击 URL 即可复制。</div>
-						<div class="access-endpoint-grid" style="margin-top: 18px;">
-							<div class="access-endpoint-card">
-								<div class="endpoint-badge">OpenAI 兼容格式</div>
-								<button type="button" class="endpoint-url" id="openai-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/chat/completions</button>
-							</div>
-							<div class="access-endpoint-card">
-								<div class="endpoint-badge">Anthropic 兼容格式</div>
-								<button type="button" class="endpoint-url" id="anthropic-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/messages</button>
-							</div>
-						</div>
-					</div>
-
 					<!-- Charts -->
 					<div class="charts-grid" style="margin-top: 24px;">
 						<div class="section-card">
@@ -3442,7 +3703,10 @@ function handleAdminPage(request, env, ctx) {
 					<div class="section-card" style="margin-top: 24px;">
 						<div class="section-header">
 							<div class="section-title">账号用量明细</div>
-							<button class="btn btn-secondary" onclick="loadUsageDetails()">刷新用量</button>
+							<div style="display: flex; align-items: center; gap: 12px;">
+								<span id="txt-last-updated" style="font-size: 12px; color: var(--text-muted); font-family: monospace;"></span>
+								<button class="btn btn-secondary" id="btn-refresh-usage" onclick="loadUsageDetails(true)">刷新用量</button>
+							</div>
 						</div>
 						<div id="accounts-usage-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
 							<!-- Individual account progress item -->
@@ -3479,6 +3743,22 @@ function handleAdminPage(request, env, ctx) {
 
 				<!-- TAB: API Keys -->
 				<div id="tab-keys" class="tab-content">
+					<!-- Proxy URL Info -->
+					<div class="section-card" style="margin-bottom: 24px;">
+						<div class="section-title">接入信息</div>
+						<div class="section-note">OpenAI SDK 和 Anthropic Messages 都可直接接入，点击 URL 即可复制。</div>
+						<div class="access-endpoint-grid" style="margin-top: 18px;">
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">OpenAI 兼容格式</div>
+								<button type="button" class="endpoint-url" id="openai-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/chat/completions</button>
+							</div>
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">Anthropic 兼容格式</div>
+								<button type="button" class="endpoint-url" id="anthropic-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/messages</button>
+							</div>
+						</div>
+					</div>
+
 					<div class="section-card">
 						<div class="section-header">
 							<div class="section-title">API 密钥管理</div>
@@ -3668,6 +3948,192 @@ function handleAdminPage(request, env, ctx) {
 			}, 3000);
 		}
 
+		function renderUsageDetails(data) {
+			let totalUsageToday = 0;
+			let totalLimit = data.length * 10000;
+			let historyData = {};
+			let modelsToday = {};
+
+			const usageList = document.getElementById('accounts-usage-list');
+
+			// 记录刷新前已有卡片的最后更新时间戳
+			const previousTimestamps = new Map();
+			usageList.querySelectorAll('.section-card').forEach(card => {
+				const id = card.dataset.id;
+				const ts = parseInt(card.dataset.lastUpdated || '0', 10);
+				if (id) previousTimestamps.set(id, ts);
+			});
+
+			usageList.innerHTML = '';
+
+			if (data.length === 0) {
+				usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px; width: 100%;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
+				return;
+			}
+
+			data.forEach(account => {
+				totalUsageToday += account.usageToday;
+
+				// Percentage formatted to 2 decimal places
+				const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
+				const warningClass = account.status === 'error' ? 'badge-danger' : (account.status === 'pending' ? 'badge-info' : (percentage >= 90 ? 'badge-warning' : 'badge-success'));
+				const statusText = account.status === 'error' ? '连接异常' : (account.status === 'pending' ? '待刷新' : (percentage >= 100 ? '用尽 (10k)' : '正常运行'));
+				
+				// Usage rounded up (Math.ceil)
+				const roundedUsage = Math.ceil(account.usageToday);
+				
+				const item = document.createElement('div');
+				const isRefreshed = previousTimestamps.has(account.id) && previousTimestamps.get(account.id) !== account.lastUpdated;
+				item.className = 'section-card' + (isRefreshed ? ' card-update-flash' : '');
+				item.dataset.id = account.id;
+				item.dataset.lastUpdated = account.lastUpdated || 0;
+				item.style.padding = '20px';
+				item.style.backgroundColor = 'rgba(255,255,255,0.01)';
+				item.innerHTML = \`
+					<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px; gap: 12px;">
+						<div style="min-width: 0; flex: 1; display: flex; align-items: center; gap: 8px;">
+							<strong style="font-size:15px; font-weight:600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto;" title="\${account.name}">\${account.name}</strong>
+							<span style="font-size:12px; color: var(--text-muted); font-family: monospace; white-space: nowrap; flex-shrink: 0;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
+						</div>
+						<span class="badge \${warningClass}" style="flex-shrink: 0;">\${statusText}</span>
+					</div>
+					<div class="progress-container">
+						<div class="progress-bar" style="width: \${percentage}%;"></div>
+					</div>
+					<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
+						<span>今日已用: \${roundedUsage.toLocaleString()} / 10,000 Neurons</span>
+						<span>\${percentage.toFixed(2)}%</span>
+					</div>
+					\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
+				\`;
+				usageList.appendChild(item);
+
+				if (account.history) {
+					account.history.forEach(h => {
+						historyData[h.date] = (historyData[h.date] || 0) + h.neurons;
+					});
+				}
+
+				if (account.modelsToday) {
+					account.modelsToday.forEach(m => {
+						modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
+					});
+				}
+			});
+
+			// Top stats formatting (Usage rounded up, Percentage 2 decimals)
+			const roundedTotalUsageToday = Math.ceil(totalUsageToday);
+			document.getElementById('stat-total-neurons').innerText = roundedTotalUsageToday.toLocaleString();
+			document.getElementById('stat-accounts-count').innerText = data.length;
+			
+			const overallPercentage = totalLimit > 0 ? Math.min(100, Number(((totalUsageToday / totalLimit) * 100).toFixed(2))) : 0;
+			document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
+			document.getElementById('stat-neurons-desc').innerText = \`\${roundedTotalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage.toFixed(2)}%)\`;
+			
+			const costSaved = (totalUsageToday / 1000) * 0.011;
+			document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
+
+			const dates = Object.keys(historyData).sort();
+			const neuronsData = dates.map(d => historyData[d]);
+			renderHistoryChart(dates, neuronsData);
+
+			const models = Object.keys(modelsToday);
+			const modelsNeurons = models.map(m => modelsToday[m]);
+			renderModelsChart(models, modelsNeurons);
+		}
+
+		let isRefreshingUsage = false;
+
+		async function loadUsageDetails(isManual = false) {
+			// 如果已经在刷新中，则直接返回，避免并发请求
+			if (isRefreshingUsage) return;
+
+			const now = Date.now();
+			const lastFetchedRaw = localStorage.getItem('cache_usage_details_last_fetched');
+			let lastFetched = lastFetchedRaw ? parseInt(lastFetchedRaw, 10) : 0;
+
+			// 优先从浏览器 localStorage 读取并渲染上次缓存的数据
+			const cachedDataRaw = localStorage.getItem('cache_accounts_usage');
+			if (cachedDataRaw) {
+				try {
+					const cachedData = JSON.parse(cachedDataRaw);
+					renderUsageDetails(cachedData);
+				} catch (e) {
+					console.error('Error parsing cached usage details:', e);
+				}
+			}
+			const cachedKeysCount = localStorage.getItem('cache_keys_count');
+			if (cachedKeysCount) {
+				document.getElementById('stat-keys-count').innerText = cachedKeysCount;
+			}
+
+			// 更新文字显示
+			updateLastUpdatedText(lastFetched);
+
+			// 如果不是手动刷新，且最后更新时间在 15 分钟以内，则直接使用缓存，不发起 API 请求
+			if (!isManual && lastFetched && (now - lastFetched) < 15 * 60 * 1000) {
+				console.log('Skipping auto refresh, last fetch was ' + Math.round((now - lastFetched) / 1000) + 's ago');
+				return;
+			}
+
+			const btn = document.getElementById('btn-refresh-usage');
+			let originalBtnText = '';
+			if (btn) {
+				originalBtnText = btn.innerHTML;
+				btn.disabled = true;
+				btn.innerHTML = '<span class="spinner"></span> 刷新中...';
+			}
+
+			isRefreshingUsage = true;
+
+			try {
+				const res = await apiFetch('/api/accounts/usage');
+				const data = await res.json();
+				
+				// 渲染最新的实时数据
+				renderUsageDetails(data);
+				
+				// 保存/更新本地缓存
+				localStorage.setItem('cache_accounts_usage', JSON.stringify(data));
+
+				// 记录更新时间戳，并更新文字
+				localStorage.setItem('cache_usage_details_last_fetched', now);
+				updateLastUpdatedText(now);
+
+				// 刷新并缓存 API 密钥数
+				const keysRes = await apiFetch('/api/keys');
+				const keys = await keysRes.json();
+				document.getElementById('stat-keys-count').innerText = keys.length;
+				localStorage.setItem('cache_keys_count', keys.length);
+
+			} catch (e) {
+				console.error(e);
+			} finally {
+				isRefreshingUsage = false;
+				if (btn) {
+					btn.disabled = false;
+					btn.innerHTML = originalBtnText;
+				}
+			}
+		}
+
+		function updateLastUpdatedText(timestamp) {
+			const label = document.getElementById('txt-last-updated');
+			if (!label) return;
+			if (!timestamp) {
+				label.innerText = '从未更新';
+				return;
+			}
+			const date = new Date(timestamp);
+			const yyyy = date.getFullYear();
+			const MM = String(date.getMonth() + 1).padStart(2, '0');
+			const dd = String(date.getDate()).padStart(2, '0');
+			const hh = String(date.getHours()).padStart(2, '0');
+			const mm = String(date.getMinutes()).padStart(2, '0');
+			const ss = String(date.getSeconds()).padStart(2, '0');
+			label.innerText = '最后更新: ' + yyyy + '-' + MM + '-' + dd + ' ' + hh + ':' + mm + ':' + ss;
+		}
+
 		function initTheme() {
 			const savedTheme = localStorage.getItem('theme');
 			if (savedTheme) {
@@ -3774,99 +4240,6 @@ function handleAdminPage(request, env, ctx) {
 			return res;
 		}
 
-		async function loadUsageDetails() {
-			try {
-				const res = await apiFetch('/api/accounts/usage');
-				const data = await res.json();
-				
-				let totalUsageToday = 0;
-				let totalLimit = data.length * 10000;
-				let historyData = {};
-				let modelsToday = {};
-
-				const usageList = document.getElementById('accounts-usage-list');
-				usageList.innerHTML = '';
-
-				if (data.length === 0) {
-					usageList.innerHTML = '<div style="color: var(--text-muted); font-size:14px; text-align:center; padding: 20px; width: 100%;">没有绑定的账号，请前往“账号管理”添加账号。</div>';
-					return;
-				}
-
-				data.forEach(account => {
-					totalUsageToday += account.usageToday;
-
-					// Percentage formatted to 2 decimal places
-					const percentage = Math.min(100, Number(((account.usageToday / 10000) * 100).toFixed(2)));
-					const warningClass = account.status === 'error' ? 'badge-danger' : (percentage >= 90 ? 'badge-warning' : 'badge-success');
-					const statusText = account.status === 'error' ? '连接异常' : (percentage >= 100 ? '用尽 (10k)' : '正常运行');
-					
-					// Usage rounded up (Math.ceil)
-					const roundedUsage = Math.ceil(account.usageToday);
-					
-					const item = document.createElement('div');
-					item.className = 'section-card';
-					item.style.padding = '20px';
-					item.style.backgroundColor = 'rgba(255,255,255,0.01)';
-					item.innerHTML = \`
-						<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
-							<div>
-								<strong style="font-size:15px; font-weight:600;">\${account.name}</strong>
-								<span style="font-size:12px; color: var(--text-muted); margin-left: 8px;">(\${account.accountId.substring(0,6)}...\${account.accountId.substring(account.accountId.length-4)})</span>
-							</div>
-							<span class="badge \${warningClass}">\${statusText}</span>
-						</div>
-						<div class="progress-container">
-							<div class="progress-bar" style="width: \${percentage}%;"></div>
-						</div>
-						<div style="display:flex; justify-content:space-between; font-size:12px; color: var(--text-muted); margin-top: 6px;">
-							<span>今日已用: \${roundedUsage.toLocaleString()} / 10,000 Neurons</span>
-							<span>\${percentage.toFixed(2)}%</span>
-						</div>
-						\${account.error ? \`<div style="color: var(--danger-color); font-size:11px; margin-top: 8px; background: rgba(239,68,68,0.08); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(239,68,68,0.12);">错误信息: \${account.error}</div>\` : ''}
-					\`;
-					usageList.appendChild(item);
-
-					if (account.history) {
-						account.history.forEach(h => {
-							historyData[h.date] = (historyData[h.date] || 0) + h.neurons;
-						});
-					}
-
-					if (account.modelsToday) {
-						account.modelsToday.forEach(m => {
-							modelsToday[m.model] = (modelsToday[m.model] || 0) + m.neurons;
-						});
-					}
-				});
-
-				// Top stats formatting (Usage rounded up, Percentage 2 decimals)
-				const roundedTotalUsageToday = Math.ceil(totalUsageToday);
-				document.getElementById('stat-total-neurons').innerText = roundedTotalUsageToday.toLocaleString();
-				document.getElementById('stat-accounts-count').innerText = data.length;
-				
-				const overallPercentage = totalLimit > 0 ? Math.min(100, Number(((totalUsageToday / totalLimit) * 100).toFixed(2))) : 0;
-				document.getElementById('stat-neurons-progress').style.width = overallPercentage + '%';
-				document.getElementById('stat-neurons-desc').innerText = \`\${roundedTotalUsageToday.toLocaleString()} / \${totalLimit.toLocaleString()} Neurons (\${overallPercentage.toFixed(2)}%)\`;
-				
-				const costSaved = (totalUsageToday / 1000) * 0.011;
-				document.getElementById('stat-cost-saving').innerText = '$' + costSaved.toFixed(2);
-
-				const keysRes = await apiFetch('/api/keys');
-				const keys = await keysRes.json();
-				document.getElementById('stat-keys-count').innerText = keys.length;
-
-				const dates = Object.keys(historyData).sort();
-				const neuronsData = dates.map(d => historyData[d]);
-				renderHistoryChart(dates, neuronsData);
-
-				const models = Object.keys(modelsToday);
-				const modelsNeurons = models.map(m => modelsToday[m]);
-				renderModelsChart(models, modelsNeurons);
-
-			} catch (e) {
-				console.error(e);
-			}
-		}
 
 		function renderHistoryChart(labels, data) {
 			if (historyChart) historyChart.destroy();
