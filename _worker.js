@@ -2761,6 +2761,79 @@ function handleAdminPage(request, env, ctx) {
 			margin-bottom: 24px;
 		}
 
+		.section-note {
+			margin-top: 6px;
+			font-size: 13px;
+			color: var(--text-muted);
+			line-height: 1.5;
+		}
+
+		.access-endpoint-grid {
+			display: grid;
+			grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+			gap: 14px;
+		}
+
+		.access-endpoint-card {
+			appearance: none;
+			width: 100%;
+			text-align: left;
+			border: 1px solid var(--border-color);
+			border-radius: 16px;
+			padding: 18px 20px;
+			background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.015));
+			box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+			backdrop-filter: blur(14px);
+			-webkit-backdrop-filter: blur(14px);
+			transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.25s, box-shadow 0.25s, background 0.25s;
+			cursor: default;
+			color: inherit;
+		}
+
+		.access-endpoint-card:hover {
+			transform: translateY(-2px);
+			border-color: rgba(168, 85, 247, 0.28);
+			box-shadow: 0 12px 30px rgba(168, 85, 247, 0.08);
+		}
+
+		.endpoint-badge {
+			display: inline-flex;
+			align-items: center;
+			padding: 4px 10px;
+			border-radius: 999px;
+			background: rgba(168, 85, 247, 0.12);
+			color: var(--accent-color);
+			font-size: 12px;
+			font-weight: 600;
+			letter-spacing: 0.01em;
+		}
+
+		.endpoint-url {
+			display: block;
+			margin-top: 12px;
+			font-size: 14px;
+			line-height: 1.55;
+			word-break: break-all;
+			color: var(--text-main);
+			text-decoration: underline;
+			text-decoration-color: rgba(168, 85, 247, 0.5);
+			text-underline-offset: 3px;
+			cursor: pointer;
+			background: transparent;
+			border: none;
+			padding: 0;
+		}
+
+		.endpoint-url:hover {
+			color: var(--accent-color);
+		}
+
+		.endpoint-hint {
+			margin-top: 10px;
+			font-size: 12px;
+			color: var(--text-muted);
+		}
+
 		.section-header {
 			display: flex;
 			justify-content: space-between;
@@ -3221,12 +3294,16 @@ function handleAdminPage(request, env, ctx) {
 
 					<!-- Proxy URL Info -->
 					<div class="section-card" style="margin-top: 24px;">
-						<div class="section-title">接入信息 (OpenAI SDK 格式)</div>
-						<div class="form-group" style="margin-bottom: 0;">
-							<label>API 基础地址 (API Base URL)</label>
-							<div style="display: flex; gap: 10px;">
-								<input type="text" id="proxy-base-url" readonly style="flex: 1;" value="">
-								<button class="btn btn-secondary" onclick="copyProxyUrl()">复制地址</button>
+						<div class="section-title">接入信息</div>
+						<div class="section-note">OpenAI SDK 和 Anthropic Messages 都可直接接入，点击 URL 即可复制。</div>
+						<div class="access-endpoint-grid" style="margin-top: 18px;">
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">OpenAI 兼容格式</div>
+								<button type="button" class="endpoint-url" id="openai-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/chat/completions</button>
+							</div>
+							<div class="access-endpoint-card">
+								<div class="endpoint-badge">Anthropic 兼容格式</div>
+								<button type="button" class="endpoint-url" id="anthropic-endpoint-url" data-endpoint-url="" onclick="copyEndpointUrl(this.dataset.endpointUrl)">https://domain/v1/messages</button>
 							</div>
 						</div>
 					</div>
@@ -3515,7 +3592,18 @@ function handleAdminPage(request, env, ctx) {
 		initTheme();
 
 		window.onload = function() {
-			document.getElementById('proxy-base-url').value = window.location.origin + '/v1';
+			const openaiUrl = window.location.origin + '/v1/chat/completions';
+			const anthropicUrl = window.location.origin + '/v1/messages';
+			const openaiUrlEl = document.getElementById('openai-endpoint-url');
+			const anthropicUrlEl = document.getElementById('anthropic-endpoint-url');
+			if (openaiUrlEl) {
+				openaiUrlEl.dataset.endpointUrl = openaiUrl;
+				openaiUrlEl.textContent = openaiUrl;
+			}
+			if (anthropicUrlEl) {
+				anthropicUrlEl.dataset.endpointUrl = anthropicUrl;
+				anthropicUrlEl.textContent = anthropicUrl;
+			}
 			switchTab('overview');
 		};
 
@@ -3742,11 +3830,27 @@ function handleAdminPage(request, env, ctx) {
 			});
 		}
 
-		function copyProxyUrl() {
-			const el = document.getElementById('proxy-base-url');
-			el.select();
-			document.execCommand('copy');
-			showToast('已复制代理基础地址！');
+		async function copyEndpointUrl(url) {
+			if (!url) return;
+			try {
+				if (navigator.clipboard && window.isSecureContext) {
+					await navigator.clipboard.writeText(url);
+				} else {
+					const input = document.createElement('input');
+					input.value = url;
+					input.style.position = 'fixed';
+					input.style.opacity = '0';
+					input.style.left = '-9999px';
+					document.body.appendChild(input);
+					input.select();
+					document.execCommand('copy');
+					document.body.removeChild(input);
+				}
+				showToast('已复制接入地址！');
+			} catch (e) {
+				console.error(e);
+				showToast('复制失败，请手动复制 URL', 'error');
+			}
 		}
 
 		async function loadAccounts() {
