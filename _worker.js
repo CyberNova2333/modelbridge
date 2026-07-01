@@ -1951,13 +1951,47 @@ async function handleLandingPage(request, env, ctx) {
 			box-shadow: 0 8px 20px rgba(168, 85, 247, 0.15);
 		}
 
-		.login-container {
-			max-width: 440px;
+		.dashboard-container {
+			max-width: 900px;
 			width: 100%;
 			display: flex;
 			flex-direction: column;
 			gap: 28px;
 			z-index: 10;
+		}
+
+		.dashboard-grid {
+			display: grid;
+			grid-template-columns: 1fr 2fr;
+			gap: 20px;
+			width: 100%;
+		}
+
+		.dashboard-grid.single-col {
+			grid-template-columns: 1fr;
+		}
+
+		.public-chart-wrapper {
+			position: relative;
+			height: 180px;
+			width: 100%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			overflow: hidden;
+		}
+
+		.public-chart-wrapper canvas {
+			max-width: 100% !important;
+		}
+
+		@media (max-width: 768px) {
+			.dashboard-grid {
+				grid-template-columns: 1fr !important;
+			}
+			.public-chart-wrapper {
+				height: 320px !important;
+			}
 		}
 
 		.login-header {
@@ -2005,6 +2039,8 @@ async function handleLandingPage(request, env, ctx) {
 			backdrop-filter: blur(var(--glass-blur));
 			-webkit-backdrop-filter: blur(var(--glass-blur));
 			transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s, border-color 0.3s;
+			min-width: 0;
+			overflow: hidden;
 		}
 
 		.stat-card:hover {
@@ -2349,29 +2385,39 @@ async function handleLandingPage(request, env, ctx) {
 		</button>
 	</div>
 
-	<div class="login-container">
-		<div class="login-header">
+	<div class="dashboard-container">
+		<div class="login-header" style="margin-bottom: 8px;">
 			<div class="logo-icon">AI</div>
 			<span class="logo-text">Workers AI to API</span>
 		</div>
 
-		<!-- Public stats widget -->
-		<div class="stat-card">
-			<div class="stat-title">所有账号今日用量汇总</div>
-			<div class="stat-value" id="public-neurons">0</div>
-			<div class="progress-container">
-				<div class="progress-bar" id="public-progress" style="width: 0%;"></div>
+		<div class="dashboard-grid">
+			<!-- Public stats widget -->
+			<div class="stat-card" style="justify-content: space-between;">
+				<div>
+					<div class="stat-title" style="margin-bottom: 10px;">今日用量汇总</div>
+					<div style="display: flex; align-items: baseline; gap: 4px;">
+						<div class="stat-value" id="public-neurons" style="font-size: 42px; background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight: 800; display: inline-block;">0</div>
+						<span style="font-size: 14px; color: var(--text-muted); font-weight: 500; font-family: 'Outfit', sans-serif;">Neurons</span>
+					</div>
+				</div>
+				
+				<div style="margin-top: 16px;">
+					<div class="progress-container">
+						<div class="progress-bar" id="public-progress" style="width: 0%;"></div>
+					</div>
+					<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+						<span id="public-limit-desc">总限额: 0 Neurons</span>
+						<span id="public-percent-desc" style="font-weight: 600; color: var(--accent-color);">0.00%</span>
+					</div>
+				</div>
 			</div>
-			<div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-top: 6px;">
-				<span id="public-limit-desc">总限额: 0 Neurons</span>
-				<span id="public-percent-desc">0.00%</span>
-			</div>
-		</div>
-		<!-- Public model chart widget -->
-		<div class="stat-card" id="public-models-card" style="display: none;">
-			<div class="stat-title" style="margin-bottom: 12px;">今日模型消耗占比</div>
-			<div style="position: relative; height: 180px; width: 100%;">
-				<canvas id="publicModelsChart"></canvas>
+			<!-- Public model chart widget -->
+			<div class="stat-card" id="public-models-card" style="display: none; align-items: center; justify-content: center; padding: 24px;">
+				<div class="stat-title" style="align-self: flex-start; margin-bottom: 8px; width: 100%;">模型消耗占比</div>
+				<div class="public-chart-wrapper">
+					<canvas id="publicModelsChart"></canvas>
+				</div>
 			</div>
 		</div>
 	</div>
@@ -2531,8 +2577,10 @@ async function handleLandingPage(request, env, ctx) {
 			document.getElementById('public-percent-desc').innerText = percent + '%';
 
 			const modelsCard = document.getElementById('public-models-card');
+			const grid = document.querySelector('.dashboard-grid');
 			if (data.modelsToday && data.modelsToday.length > 0) {
 				modelsCard.style.display = 'block';
+				if (grid) grid.classList.remove('single-col');
 				
 				const labels = data.modelsToday.map(m => m.model.split('/').pop());
 				const chartData = data.modelsToday.map(m => m.neurons);
@@ -2562,7 +2610,8 @@ async function handleLandingPage(request, env, ctx) {
 						cutout: '70%',
 						plugins: {
 							legend: {
-								position: 'bottom',
+								position: window.innerWidth < 480 ? 'bottom' : 'right',
+								align: 'center',
 								labels: {
 									color: textColor,
 									boxWidth: 8,
@@ -2575,6 +2624,7 @@ async function handleLandingPage(request, env, ctx) {
 				});
 			} else {
 				modelsCard.style.display = 'none';
+				if (grid) grid.classList.add('single-col');
 				if (publicModelsChartInstance) {
 					publicModelsChartInstance.destroy();
 					publicModelsChartInstance = null;
