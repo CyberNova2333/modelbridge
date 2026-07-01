@@ -10,7 +10,7 @@ const DEFAULT_MODEL_MAP = {
 	'glm-5.2': '@cf/zai-org/glm-5.2',
 	'glm-4.7-flash': '@cf/zai-org/glm-4.7-flash',
 	'kimi-k2.7-code': '@cf/moonshotai/kimi-k2.7-code',
-	//'kimi-k2.6': '@cf/moonshotai/kimi-k2.6', // 就是一坨屎，别吃
+	'kimi-k2.6': '@cf/moonshotai/kimi-k2.6', // 就是一坨屎，别吃
 	'gemma-4-26b-a4b-it': '@cf/google/gemma-4-26b-a4b-it',
 	'nemotron-3-120b-a12b': '@cf/nvidia/nemotron-3-120b-a12b',
 	'gpt-oss-20b': '@cf/openai/gpt-oss-20b',
@@ -128,6 +128,10 @@ async function getAppConfig(env) {
 				customModelMap: data.customModelMap || {}
 			};
 		} catch (e) { }
+	} else {
+		// 仅在 KV 首次初始化时写入默认模型映射，避免覆盖已有配置。
+		parsed.customModelMap = { ...DEFAULT_MODEL_MAP };
+		await env.KV.put('config', JSON.stringify(parsed));
 	}
 
 	memoryCache.config = parsed;
@@ -3409,8 +3413,9 @@ function handleAdminPage(request, env, ctx) {
 								<label>CF 目标模型路径 (Cloudflare Model Path)</label>
 								<input type="text" id="map-target" placeholder="如: @cf/meta/llama-3.1-8b-instruct">
 							</div>
-							<div style="display: flex; align-items: flex-end;">
+							<div style="display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap;">
 								<button class="btn btn-primary" onclick="addMapping()" style="height: 45px;">添加/修改</button>
+								<button class="btn btn-secondary" onclick="restorePresetMappings()" style="height: 45px;">预设映射</button>
 							</div>
 						</div>
 
@@ -4103,18 +4108,17 @@ function handleAdminPage(request, env, ctx) {
 				customMappings = data.customModelMap || {};
 				const tbody = document.getElementById('mappings-table-body');
 				tbody.innerHTML = '';
-				const combined = { ...defaultMappings, ...customMappings };
-				Object.keys(combined).forEach(source => {
-					const target = combined[source];
-					const isCustom = customMappings.hasOwnProperty(source);
-					const typeText = isCustom ? '<span class="badge badge-warning">自定义</span>' : '<span class="badge badge-success">系统默认</span>';
+				Object.keys(customMappings).forEach(source => {
+					const target = customMappings[source];
+					const isPreset = Object.prototype.hasOwnProperty.call(defaultMappings, source) && defaultMappings[source] === target;
+					const typeText = isPreset ? '<span class="badge badge-success">预设映射</span>' : '<span class="badge badge-warning">自定义</span>';
 					const tr = document.createElement('tr');
 					tr.innerHTML = \`
 						<td><code style="cursor: pointer;" title="点击复制" onclick="copyModelId('\${source}')">\${source}</code></td>
 						<td><code style="cursor: pointer;" title="点击复制" onclick="copyModelId('\${target}')">\${target}</code></td>
 						<td>\${typeText}</td>
 						<td>
-							\${isCustom ? \`<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px; color: var(--danger-color);" onclick="deleteMapping('\${source}')">重置</button>\` : '<span style="color: var(--text-muted); font-size:12px;">只读</span>'}
+							<button class="btn btn-secondary" style="padding:6px 12px; font-size:12px; border-radius:6px; color: var(--danger-color);" onclick="deleteMapping('\${source}')">删除</button>
 						</td>
 					\`;
 					tbody.appendChild(tr);
@@ -4147,8 +4151,31 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
+		async function restorePresetMappings() {
+			const mergedMappings = { ...customMappings, ...defaultMappings };
+			const hasChanges = Object.keys(defaultMappings).some(source => customMappings[source] !== defaultMappings[source]);
+
+			if (!hasChanges && Object.keys(defaultMappings).every(source => customMappings[source] === defaultMappings[source])) {
+				showToast('预设映射已存在，无需重复添加');
+				return;
+			}
+
+			const res = await apiFetch('/api/settings', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ customModelMap: mergedMappings })
+			});
+			if (res.ok) {
+				customMappings = mergedMappings;
+				loadSettings();
+				showToast('已恢复预设映射');
+			} else {
+				showToast('恢复预设映射失败！', 'error');
+			}
+		}
+
 		async function deleteMapping(source) {
-			if (!confirm('确定要删除此自定义映射并恢复为系统默认吗？')) return;
+			if (!confirm('确定要删除此映射吗？')) return;
 			delete customMappings[source];
 			const res = await apiFetch('/api/settings', {
 				method: 'POST',
@@ -4157,7 +4184,7 @@ function handleAdminPage(request, env, ctx) {
 			});
 			if (res.ok) {
 				loadSettings();
-				showToast('已重置为默认映射');
+				showToast('已删除映射');
 			} else {
 				showToast('删除映射失败！', 'error');
 			}
