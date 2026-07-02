@@ -78,6 +78,13 @@ export default {
 			return handleLandingPage(request, env, ctx);
 		}
 
+		// robots.txt 支持，用于屏蔽搜索引擎爬虫
+		if (url.pathname === '/robots.txt') {
+			return new Response('User-agent: *\nDisallow: /', {
+				headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+			});
+		}
+
 		// 6. 其他路径一律返回 404
 		return new Response('404 Not Found', { status: 404 });
 	}
@@ -1876,6 +1883,7 @@ async function handleLandingPage(request, env, ctx) {
 	const html = `<!DOCTYPE html>
 <head>
 	<meta charset="UTF-8">
+	<meta name="robots" content="noindex, nofollow">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Workers AI to API - Cloudflare Workers AI Proxy</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2921,6 +2929,7 @@ function handleAdminPage(request, env, ctx) {
 	const html = `<!DOCTYPE html>
 <head>
 	<meta charset="UTF-8">
+	<meta name="robots" content="noindex, nofollow">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>Workers AI to API Dashboard</title>
 	<link rel="preconnect" href="https://fonts.googleapis.com">
