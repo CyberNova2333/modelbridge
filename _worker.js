@@ -4187,7 +4187,7 @@ function handleAdminPage(request, env, ctx) {
 				<input type="text" id="account-token" placeholder="CF 账号 API Token (会安全遮蔽保存)" oninput="onAccountInfoChange()">
 			</div>
 			
-			<div id="test-result-alert" style="display: none; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 500;"></div >
+			<div id="test-result-alert" style="display: none; padding: 12px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; word-break: break-word; overflow-wrap: break-word; max-height: 200px; overflow-y: auto; line-height: 1.6; border: 1px solid transparent;"></div>
 
 			<div class="modal-footer">
 				<button class="btn btn-success" onclick="testConnection()" id="btn-test-conn">测试连接</button>
@@ -4819,14 +4819,42 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
+		function escapeHtml(str) {
+			if (!str) return '';
+			return String(str)
+				.replace(/&/g, '&amp;')
+				.replace(/</g, '&lt;')
+				.replace(/>/g, '&gt;')
+				.replace(/"/g, '&quot;')
+				.replace(/'/g, '&#39;');
+		}
+
+		function setAlertStyle(el, type) {
+			const styles = {
+				warning: { bg: 'rgba(245, 158, 11, 0.12)', color: '#f59e0b', border: 'rgba(245, 158, 11, 0.3)' },
+				success: { bg: 'rgba(16, 185, 129, 0.12)', color: '#10b981', border: 'rgba(16, 185, 129, 0.3)' },
+				danger:  { bg: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', border: 'rgba(239, 68, 68, 0.3)' }
+			};
+			const s = styles[type] || styles.danger;
+			el.style.backgroundColor = s.bg;
+			el.style.color = s.color;
+			el.style.borderColor = s.border;
+		}
+
+		const ALERT_ICONS = {
+			spinner: '<svg style="width:16px;height:16px;animation:spin 1s linear infinite;flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>',
+			check:    '<svg style="width:18px;height:18px;flex-shrink:0;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+			warning: '<svg style="width:18px;height:18px;flex-shrink:0;margin-top:1px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>'
+		};
+
 		async function testConnection() {
 			const accountId = document.getElementById('account-id').value;
 			const apiToken = document.getElementById('account-token').value;
 			const id = document.getElementById('account-id-edit').value;
 			const alertEl = document.getElementById('test-result-alert');
 			alertEl.style.display = 'block';
-			alertEl.className = 'badge badge-warning';
-			alertEl.innerText = '测试中...';
+			setAlertStyle(alertEl, 'warning');
+			alertEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;">' + ALERT_ICONS.spinner + '<span>测试中...</span></div>';
 
 			document.getElementById('perm-wa-read').innerHTML = '';
 			document.getElementById('perm-wa-edit').innerHTML = '';
@@ -4846,19 +4874,51 @@ function handleAdminPage(request, env, ctx) {
 					updatePermissionStatus('perm-aa-read', data.permissions.accountAnalyticsRead);
 				}
 				if (data.success) {
-					alertEl.className = 'badge badge-success';
-					alertEl.innerText = '连接成功！API 权限有效';
+					setAlertStyle(alertEl, 'success');
+					alertEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;">' + ALERT_ICONS.check + '<span>连接成功！API 权限全部有效</span></div>';
 					showToast('连接测试成功！');
 					document.getElementById('btn-save-account').disabled = false;
 				} else {
-					alertEl.className = 'badge badge-danger';
-					alertEl.innerText = '连接失败: ' + (data.error || '部分权限验证未通过');
+					setAlertStyle(alertEl, 'danger');
+
+					// Build structured error details from permissions data
+					let errorDetailHtml = '';
+					if (data.permissions) {
+						const permList = [
+							{ key: 'workersAiRead',       label: 'Workers AI > Read' },
+							{ key: 'workersAiEdit',       label: 'Workers AI > Edit' },
+							{ key: 'accountAnalyticsRead', label: 'Account Analytics > Read' }
+						];
+						const failedItems = permList.filter(p => {
+							const perm = data.permissions[p.key];
+							return perm && !perm.success;
+						});
+						if (failedItems.length > 0) {
+							errorDetailHtml = failedItems.map(p => {
+								const perm = data.permissions[p.key];
+								const errMsg = escapeHtml(perm.error || '未知错误');
+								return '<div style="padding:3px 0;word-break:break-all;overflow-wrap:break-word;"><span style="opacity:0.6;">●</span> <strong>' + p.label + '</strong>: ' + errMsg + '</div>';
+							}).join('');
+						}
+					}
+					if (!errorDetailHtml) {
+						errorDetailHtml = '<div style="padding:3px 0;word-break:break-all;overflow-wrap:break-word;">' + escapeHtml(data.error || '部分权限验证未通过') + '</div>';
+					}
+
+					alertEl.innerHTML = '<div style="display:flex;align-items:flex-start;gap:8px;">' +
+						ALERT_ICONS.warning +
+						'<div style="flex:1;min-width:0;">' +
+						'<div style="font-weight:700;margin-bottom:4px;">连接失败 — 以下权限验证未通过：</div>' +
+						'<div style="font-size:12px;opacity:0.85;line-height:1.7;">' + errorDetailHtml + '</div>' +
+						'</div>' +
+						'</div>';
+
 					showToast('测试连接失败，请检查 Token 权限', 'error');
 					document.getElementById('btn-save-account').disabled = true;
 				}
 			} catch (e) {
-				alertEl.className = 'badge badge-danger';
-				alertEl.innerText = '连接超时或异常！';
+				setAlertStyle(alertEl, 'danger');
+				alertEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;">' + ALERT_ICONS.warning + '<span>连接超时或异常，请重试</span></div>';
 				showToast('连接异常，请重试', 'error');
 				document.getElementById('btn-save-account').disabled = true;
 			}
