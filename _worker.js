@@ -3530,6 +3530,19 @@ function handleAdminPage(request, env, ctx) {
 			transform: translateY(-1px);
 		}
 
+		.btn-success {
+			background-color: var(--success-color);
+			color: white;
+			box-shadow: 0 4px 14px rgba(16, 185, 129, 0.3);
+		}
+
+		.btn-success:hover {
+			background-color: #059669;
+			transform: translateY(-2px);
+			box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+			opacity: 0.95;
+		}
+
 		.btn:disabled {
 			opacity: 0.6;
 			cursor: not-allowed;
@@ -4162,7 +4175,7 @@ function handleAdminPage(request, env, ctx) {
 			</div>
 			<div class="form-group">
 				<label for="account-id">Account ID</label>
-				<input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面">
+				<input type="text" id="account-id" placeholder="获取于 CF 控制台 Workers AI 页面" oninput="onAccountInfoChange()">
 			</div>
 			<div class="form-group">
 				<label for="account-token">API Token (需要创建并赋予以下 3 个权限):</label>
@@ -4171,14 +4184,14 @@ function handleAdminPage(request, env, ctx) {
 					• Workers AI &gt; Edit <span id="perm-wa-edit" style="margin-left: 8px;"></span><br>
 					• Account Analytics &gt; Read <span id="perm-aa-read" style="margin-left: 8px;"></span>
 				</div>
-				<input type="text" id="account-token" placeholder="CF 账号 API Token (会安全遮蔽保存)">
+				<input type="text" id="account-token" placeholder="CF 账号 API Token (会安全遮蔽保存)" oninput="onAccountInfoChange()">
 			</div>
 			
 			<div id="test-result-alert" style="display: none; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 500;"></div >
 
 			<div class="modal-footer">
-				<button class="btn btn-secondary" onclick="testConnection()" id="btn-test-conn">测试连接</button>
-				<button class="btn btn-primary" onclick="saveAccount()">保存账号</button>
+				<button class="btn btn-success" onclick="testConnection()" id="btn-test-conn">测试连接</button>
+				<button class="btn btn-primary" onclick="saveAccount()" id="btn-save-account" disabled>保存账号</button>
 			</div>
 		</div>
 	</div>
@@ -4765,6 +4778,7 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('perm-wa-read').innerHTML = '';
 			document.getElementById('perm-wa-edit').innerHTML = '';
 			document.getElementById('perm-aa-read').innerHTML = '';
+			document.getElementById('btn-save-account').disabled = true;
 			document.getElementById('account-modal').classList.add('active');
 		}
 
@@ -4782,7 +4796,16 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('perm-wa-read').innerHTML = '';
 			document.getElementById('perm-wa-edit').innerHTML = '';
 			document.getElementById('perm-aa-read').innerHTML = '';
+			document.getElementById('btn-save-account').disabled = true;
 			document.getElementById('account-modal').classList.add('active');
+		}
+
+		function onAccountInfoChange() {
+			document.getElementById('btn-save-account').disabled = true;
+			document.getElementById('test-result-alert').style.display = 'none';
+			document.getElementById('perm-wa-read').innerHTML = '';
+			document.getElementById('perm-wa-edit').innerHTML = '';
+			document.getElementById('perm-aa-read').innerHTML = '';
 		}
 
 		function updatePermissionStatus(elementId, statusObj) {
@@ -4808,6 +4831,7 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('perm-wa-read').innerHTML = '';
 			document.getElementById('perm-wa-edit').innerHTML = '';
 			document.getElementById('perm-aa-read').innerHTML = '';
+			document.getElementById('btn-save-account').disabled = true;
 
 			try {
 				const res = await apiFetch('/api/accounts/test', {
@@ -4825,15 +4849,18 @@ function handleAdminPage(request, env, ctx) {
 					alertEl.className = 'badge badge-success';
 					alertEl.innerText = '连接成功！API 权限有效';
 					showToast('连接测试成功！');
+					document.getElementById('btn-save-account').disabled = false;
 				} else {
 					alertEl.className = 'badge badge-danger';
 					alertEl.innerText = '连接失败: ' + (data.error || '部分权限验证未通过');
 					showToast('测试连接失败，请检查 Token 权限', 'error');
+					document.getElementById('btn-save-account').disabled = true;
 				}
 			} catch (e) {
 				alertEl.className = 'badge badge-danger';
 				alertEl.innerText = '连接超时或异常！';
 				showToast('连接异常，请重试', 'error');
+				document.getElementById('btn-save-account').disabled = true;
 			}
 		}
 
