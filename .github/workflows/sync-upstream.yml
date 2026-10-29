@@ -1,39 +1,119 @@
-name: Upstream Sync
-
-permissions:
-  contents: write
+name: Propose upstream update
 
 on:
   schedule:
-    - cron: "0 0 * * *" # 每天 北京时间早上 8:00 (UTC 0:00) 自动执行
-  workflow_dispatch: # 支持在 GitHub 页面上手动点击触发
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-update
+  cancel-in-progress: false
 
 jobs:
-  sync_latest_from_upstream:
-    name: Sync latest commits from upstream repo
-    runs-on: ubuntu-latest
+  validate:
     if: ${{ github.event.repository.fork }}
-
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      base: ${{ steps.merge.outputs.base }}
+      upstream: ${{ steps.merge.outputs.upstream }}
+      tree: ${{ steps.merge.outputs.tree }}
     steps:
-      # Step 1: run a standard checkout action
-      - name: Checkout target repo
-        uses: actions/checkout@v4
-
-      # Step 2: run the sync action
-      - name: Sync upstream changes
-        id: sync
-        uses: aormsby/fork-sync-with-upstream-action@v3.4.3
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
-          upstream_sync_repo: cmliussss2024/WorkersAI2API
-          upstream_sync_branch: main
-          target_sync_branch: main
-          target_repo_token: ${{ secrets.GITHUB_TOKEN }} # 自动生成，无需用户手动配置
-          # Set test_mode true to run tests instead of the true action!!
-          test_mode: false
-
-      - name: Sync check
-        if: failure()
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+      - name: Merge upstream into a temporary checkout
+        id: merge
+        shell: bash
         run: |
-          echo "[Error] 由于上游仓库的 workflow 文件变更，导致 GitHub 自动暂停了本次自动更新，你需要手动 Sync Fork 一次，详细教程请查看项目README.md "
-          echo "[Error] Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork. Please refer to the project README.md for instructions. "
-          exit 1
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          git fetch --no-tags https://github.com/cmliussss2024/WorkersAI2API.git main
+          upstream=$(git rev-parse FETCH_HEAD)
+          if git merge-base --is-ancestor "$upstream" HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -c core.hooksPath=/dev/null merge --no-edit --no-ff "$upstream"
+          if git diff --quiet "$base" HEAD; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "upstream=$upstream" >> "$GITHUB_OUTPUT"
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+      # Candidate code only runs in this read-only job, without repository secrets.
+      - name: Test candidate
+        if: steps.merge.outputs.changed == 'true'
+        run: node --test tests/*.test.mjs
+
+  propose:
+    needs: validate
+    if: needs.validate.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      # Never execute files from the candidate in the job holding the write token.
+      - name: Reconstruct the checked tree and open a draft PR
+        shell: bash
+        env:
+          BASE_SHA: ${{ needs.validate.outputs.base }}
+          UPSTREAM_SHA: ${{ needs.validate.outputs.upstream }}
+          EXPECTED_TREE: ${{ needs.validate.outputs.tree }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for value in "$BASE_SHA" "$UPSTREAM_SHA" "$EXPECTED_TREE"; do
+            [[ "$value" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          done
+          test "$(git rev-parse HEAD)" = "$BASE_SHA"
+          git fetch --no-tags https://github.com/cmliussss2024/WorkersAI2API.git "$UPSTREAM_SHA"
+          test "$(git rev-parse FETCH_HEAD)" = "$UPSTREAM_SHA"
+          branch="codex/upstream-${UPSTREAM_SHA:0:12}-${BASE_SHA:0:12}"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -c core.hooksPath=/dev/null merge --no-edit --no-ff "$UPSTREAM_SHA"
+          test "$(git rev-parse 'HEAD^{tree}')" = "$EXPECTED_TREE"
+          if ! git diff --quiet "$BASE_SHA" HEAD -- .github/workflows; then
+            echo '::error::Upstream changes workflows. Review and import these changes manually.'
+            exit 1
+          fi
+          gh auth setup-git
+          if git ls-remote --exit-code --heads origin "refs/heads/$branch" > /dev/null; then
+            git fetch --no-tags origin "refs/heads/$branch"
+            test "$(git rev-parse 'FETCH_HEAD^{tree}')" = "$EXPECTED_TREE"
+          else
+            git push origin "HEAD:refs/heads/$branch"
+          fi
+          existing=$(gh pr list --base main --head "$branch" --state all --json number --jq 'length')
+          if [ "$existing" != 0 ]; then exit 0; fi
+          body="$RUNNER_TEMP/upstream-pr-body.txt"
+          cat > "$body" <<EOF
+          Proposes upstream commit $UPSTREAM_SHA on top of $BASE_SHA.
+
+          The candidate passed the Node.js regression suite in a separate read-only job. Review credential handling, model input/output transformations, and deployment configuration before merging. No automatic merge or deployment is configured by this workflow.
+          EOF
+          gh pr create --draft --base main --head "$branch" \
+            --title "Propose upstream update ${UPSTREAM_SHA:0:12}" --body-file "$body"

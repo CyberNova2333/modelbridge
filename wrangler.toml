@@ -1,11 +1,36 @@
-name = "workers-ai2api"
+name = "aigateway"
+account_id = "d29f3f97ba79bfe3ca0808da52b2a157"
 main = "_worker.js"
 compatibility_date = "2026-06-30"
+compatibility_flags = ["global_fetch_strictly_public", "enable_request_signal"]
+workers_dev = true
+preview_urls = false
+
+[[routes]]
+pattern = "aigateway.cbnv.top"
+custom_domain = true
 
 [[kv_namespaces]]
 binding = "KV"
-id = "placeholder_id" # 部署时请在此处填入您的生产环境 KV Namespace ID
+id = "fec17ad7870a4d488b96717f7a282410"
+
+[[durable_objects.bindings]]
+name = "CONFIG_STORE"
+class_name = "AppConfigStore"
+
+[[migrations]]
+tag = "app-config-v1"
+new_sqlite_classes = ["AppConfigStore"]
 
 [vars]
-# ADMIN_PASSWORD = "your_admin_password" # 可选：管理员面板密码，如果不设置则可在页面首次加载时配置
-# CUSTOM_MODEL_MAP = "{}" # 可选：自定义模型映射的 JSON 字符串
+# ADMIN_PASSWORD 必须通过 wrangler secret put ADMIN_PASSWORD 设置。
+# 升级部署保留已有 Secret，不要把密码写入此文件。
+
+[observability]
+# Gemini clients may put an instance API key in the URL. Never retain query strings.
+redact_query_string = true
+
+[observability.logs]
+enabled = true
+invocation_logs = true
+persist = true

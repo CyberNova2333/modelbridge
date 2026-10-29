@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="300" viewBox="0 0 720 200" role="img" aria-labelledby="title desc">
+  <title id="title">模桥 ModelBridge · 多模型、多协议 API 网关</title>
+  <desc id="desc">蓝色桥拱和接口节点标识，搭配 ModelBridge 字标及中文用途说明。</desc>
+  <defs>
+    <linearGradient id="blue" x1="12" y1="8" x2="116" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#3481ff"/>
+      <stop offset="1" stop-color="#1646b4"/>
+    </linearGradient>
+  </defs>
+  <rect x=".5" y=".5" width="719" height="199" rx="24" fill="#f8fbff" stroke="#dce8ff"/>
+  <g transform="translate(28 36)">
+    <rect width="128" height="128" rx="30" fill="url(#blue)"/>
+    <rect x="1" y="1" width="126" height="126" rx="29" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2"/>
+    <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M35 91V43M93 91V43M35 71C47 43 81 43 93 71" stroke-width="8"/>
+      <path d="M50 54V91M78 54V91" stroke-width="4" stroke-opacity=".55"/>
+      <path d="M25 92H103" stroke-width="8"/>
+    </g>
+    <circle cx="25" cy="92" r="6" fill="#bce4ff"/>
+    <circle cx="103" cy="92" r="6" fill="#bce4ff"/>
+    <circle cx="25" cy="92" r="2" fill="#2563eb"/>
+    <circle cx="103" cy="92" r="2" fill="#2563eb"/>
+  </g>
+  <text x="188" y="103" font-family="Inter, Segoe UI, Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="-2.4" fill="#142b4b">Model<tspan fill="#2563eb">Bridge</tspan></text>
+  <text x="192" y="141" font-family="PingFang SC, Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="21" fill="#526d91">模桥 · 多模型、多协议 API 网关</text>
+  <rect x="192" y="159" width="34" height="4" rx="2" fill="#2563eb"/>
+</svg>
