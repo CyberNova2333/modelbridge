@@ -3,6 +3,9 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('../_worker.js', import.meta.url), 'utf8');
+const { readRequestJson, requestJsonErrorResponse } = await import('data:text/javascript;base64,' + Buffer.from(
+  source + '\nexport { readRequestJson, requestJsonErrorResponse };',
+).toString('base64'));
 const helperStart = source.indexOf('function toLegacyCompletion(');
 const helperEnd = source.indexOf('// 透传 CF /ai/v1/chat/completions', helperStart);
 assert(helperStart > 0 && helperEnd > helperStart);
@@ -14,6 +17,7 @@ const handlerStart = source.indexOf('async function handleCompletions(');
 const handlerEnd = source.indexOf('function convertAnthropicToOpenAI(', handlerStart);
 const handlerFactory = new Function(
   'resolveModelName', 'callOpenAICompatibleAPI', 'passthroughStream', 'toLegacyCompletion', 'legacyCompletionStream',
+  'readRequestJson', 'requestJsonErrorResponse',
   source.slice(handlerStart, handlerEnd) + '\nreturn handleCompletions;',
 );
 function harness(upstream, resolveModel = async model => '@cf/' + model) {
@@ -21,7 +25,7 @@ function harness(upstream, resolveModel = async model => '@cf/' + model) {
   const handle = handlerFactory(resolveModel, async payload => {
     calls.push(payload);
     return upstream;
-  }, () => { throw new Error('Chat stream transformer used for a legacy request'); }, toLegacyCompletion, legacyCompletionStream);
+  }, () => { throw new Error('Chat stream transformer used for a legacy request'); }, toLegacyCompletion, legacyCompletionStream, readRequestJson, requestJsonErrorResponse);
   return { calls, handle: (body, path = '/v1/completions') => handle(new Request('https://test.invalid' + path, {
     method: 'POST', body: JSON.stringify(body),
   }), {}, path) };

@@ -6,8 +6,34 @@
 
 // 网页品牌独立于部署服务名；不会自动读取 Wrangler 的 Worker 名称。
 const PROJECT_DISPLAY_NAME = '模桥 ModelBridge';
-const PROJECT_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" aria-hidden="true" style="display:block;width:100%;height:100%"><rect width="128" height="128" rx="16" fill="#0C5CAB"/><g fill="none" stroke="#fafafa" stroke-linecap="round" stroke-linejoin="round"><path d="M35 91V43M93 91V43M35 71C47 43 81 43 93 71" stroke-width="8"/><path d="M50 54V91M78 54V91" stroke-width="4" stroke-opacity=".55"/><path d="M25 92H103" stroke-width="8"/></g><circle cx="25" cy="92" r="6" fill="#97bddf"/><circle cx="103" cy="92" r="6" fill="#97bddf"/></svg>';
+// Standalone SVG matches assets/modelbridge-icon.svg; data URLs isolate its gradient IDs.
+const PROJECT_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><linearGradient id="blue" x1="12" y1="8" x2="116" y2="128" gradientUnits="userSpaceOnUse"><stop stop-color="#3481ff"/><stop offset="1" stop-color="#1646b4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#blue)"/><rect x="1" y="1" width="126" height="126" rx="29" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2"/><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path d="M35 91V43M93 91V43M35 71C47 43 81 43 93 71" stroke-width="8"/><path d="M50 54V91M78 54V91" stroke-width="4" stroke-opacity=".55"/><path d="M25 92H103" stroke-width="8"/></g><circle cx="25" cy="92" r="6" fill="#bce4ff"/><circle cx="103" cy="92" r="6" fill="#bce4ff"/><circle cx="25" cy="92" r="2" fill="#2563eb"/><circle cx="103" cy="92" r="2" fill="#2563eb"/></svg>';
 const PROJECT_ICON_DATA_URI = 'data:image/svg+xml,' + encodeURIComponent(PROJECT_ICON_SVG);
+const PROJECT_BRAND_CSS = `
+.project-brand { display: inline-flex; align-items: center; gap: 11px; flex-shrink: 0; color: var(--text-main, #142b4b); text-decoration: none; }
+.project-brand-icon { display: block; width: 42px; height: 42px; flex: 0 0 auto; }
+.project-brand-copy { display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
+.project-brand-wordmark { font: 700 24px/1.05 Inter, 'Segoe UI', Arial, sans-serif; letter-spacing: -.9px; }
+.project-brand-wordmark span { color: #83b4ff; }
+:root[data-theme="light"] .project-brand-wordmark span { color: #2563eb; }
+.project-brand-caption { font: 500 11px/1.25 'PingFang SC', 'Microsoft YaHei', sans-serif; letter-spacing: 1.1px; color: var(--text-muted, #526d91); }
+.project-brand:focus-visible { outline: 2px solid var(--accent-color, #2563eb); outline-offset: 5px; border-radius: 5px; }
+.logo-area .project-brand { gap: 9px; }
+.logo-area .project-brand-icon { width: 36px; height: 36px; }
+.logo-area .project-brand-wordmark { font-size: 20px; letter-spacing: -.7px; }
+.logo-area .project-brand-caption { font-size: 10px; letter-spacing: .8px; }
+@media(max-width:480px) {
+ .site-header { gap: 12px; }
+ .project-brand, .logo-area .project-brand { gap: 8px; }
+ .project-brand-icon, .logo-area .project-brand-icon { width: 34px; height: 34px; }
+ .project-brand-wordmark, .logo-area .project-brand-wordmark { font-size: 19px; letter-spacing: -.65px; }
+ .project-brand-caption, .logo-area .project-brand-caption { font-size: 10px; letter-spacing: .7px; }
+}
+`;
+
+function projectBrandMarkup() {
+	return `<a class="project-brand" href="/" aria-label="${PROJECT_DISPLAY_NAME} 首页"><img class="project-brand-icon" src="${PROJECT_ICON_DATA_URI}" width="42" height="42" alt=""><span class="project-brand-copy"><span class="project-brand-wordmark">Model<span>Bridge</span></span><span class="project-brand-caption">模桥 · AI 模型网关</span></span></a>`;
+}
 
 // 默认模型映射表（左边是客户端请求的模型名，右边是 Cloudflare 上对应的真实模型）
 // 仅收录官方目录中无需付费计费方式、可使用每日免费额度的模型。
@@ -90,7 +116,9 @@ export default {
 			requestEnv[REQUEST_CONTEXT] = { origin: new URL(request.url).origin, config: undefined };
 			return await handleRequest(request, requestEnv, ctx);
 		} catch (error) {
-			console.error('Request failed:', error.message);
+			if (error instanceof RequestBodyError) return addCORSHeaders(requestJsonErrorResponse(request, error));
+			// Exception messages may contain parsed input, credentials or provider diagnostics.
+			console.error('Request failed: internal_error');
 			return addCORSHeaders(Response.json({ error: { message: 'Service temporarily unavailable', type: 'server_error' } }, { status: 503 }));
 		}
 	}
@@ -179,6 +207,60 @@ function addCORSHeaders(response) {
 	return newResponse;
 }
 
+const LOGIN_JSON_LIMIT = 16 * 1024;
+const ADMIN_JSON_LIMIT = 1024 * 1024;
+const API_JSON_LIMIT = 16 * 1024 * 1024;
+
+class RequestBodyError extends Error {
+	constructor(status, message) { super(message); this.status = status; }
+}
+
+// Count actual bytes, including chunked requests, before decoding or parsing JSON.
+async function readRequestJson(request, maxBytes = API_JSON_LIMIT) {
+	const tooLarge = () => new RequestBodyError(413, 'JSON request body exceeds the size limit.');
+	if (Number(request.headers.get('content-length')) > maxBytes) {
+		void request.body?.cancel().catch(() => {});
+		throw tooLarge();
+	}
+	if (!request.body) throw new RequestBodyError(400, 'Invalid JSON body.');
+	const reader = request.body.getReader(), decoder = new TextDecoder('utf-8', { fatal: true });
+	const cancel = () => { void reader.cancel().catch(() => {}); };
+	request.signal.addEventListener('abort', cancel, { once: true });
+	let bytes = 0, text = '';
+	try {
+		while (true) {
+			if (request.signal.aborted) throw new RequestBodyError(499, 'Request cancelled.');
+			const { value, done } = await reader.read();
+			if (request.signal.aborted) throw new RequestBodyError(499, 'Request cancelled.');
+			if (done) break;
+			bytes += value.byteLength;
+			if (bytes > maxBytes) throw tooLarge();
+			text += decoder.decode(value, { stream: true });
+		}
+		text += decoder.decode();
+		const payload = JSON.parse(text);
+		if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new RequestBodyError(400, 'Request body must be an object.');
+		return payload;
+	} catch (error) {
+		cancel();
+		if (error instanceof RequestBodyError) throw error;
+		throw new RequestBodyError(400, 'Invalid JSON body.');
+	} finally {
+		request.signal.removeEventListener('abort', cancel);
+		reader.releaseLock();
+	}
+}
+
+function requestJsonErrorResponse(request, error) {
+	const status = error instanceof RequestBodyError ? error.status : 400;
+	const message = error instanceof RequestBodyError ? error.message : 'Invalid JSON body.';
+	const path = new URL(request.url).pathname;
+	if (path.startsWith('/api/')) return Response.json({ error: message }, { status });
+	if (/^\/(?:v1beta|v1)\/models\//.test(path)) return geminiError(message, status);
+	const details = { message, type: 'invalid_request_error' };
+	return Response.json(path === '/v1/messages' ? { type: 'error', error: details } : { error: details }, { status });
+}
+
 // 工具函数：计算字符串的 SHA-256 哈希值
 async function sha256(message) {
 	const msgBuffer = new TextEncoder().encode(message);
@@ -221,39 +303,47 @@ function normalizeProviderAccountInput(input, existing) {
 	if (input.id !== undefined && typeof input.id !== 'string') throw new Error('Invalid account ID');
 	const provider = input.provider || accountProviderForAdmin(existing || input);
 	if (!ACCOUNT_PROVIDERS.includes(provider)) throw new Error('Unsupported provider');
+	const providerChanged = !!existing && provider !== accountProviderForAdmin(existing);
+	const retained = providerChanged ? undefined : existing;
+	if (providerChanged && (typeof input.apiToken !== 'string' || !input.apiToken.trim() || input.apiToken.trim() === '********' || input.apiToken.includes('...'))) {
+		throw new Error('Changing provider requires a new API key or token.');
+	}
 	const name = input.name === undefined ? (existing?.name || 'Upstream account') : input.name;
 	if (typeof name !== 'string') throw new Error('Account name must be a string');
-	const accountId = input.accountId ?? existing?.accountId ?? '';
+	const accountId = input.accountId ?? retained?.accountId ?? '';
 	if (typeof accountId !== 'string' || (provider === 'cloudflare' && !accountId.trim())) throw new Error('Cloudflare Account ID is required');
-	let apiToken = input.apiToken ?? existing?.apiToken;
-	if (existing && (apiToken === '' || apiToken === '********' || (typeof apiToken === 'string' && apiToken.includes('...')))) apiToken = existing.apiToken;
-	if (typeof apiToken !== 'string' || !apiToken.trim() || apiToken === '********') throw new Error('API key or token is required');
+	let apiToken = input.apiToken ?? retained?.apiToken;
+	if (retained && (apiToken === '' || apiToken === '********' || (typeof apiToken === 'string' && apiToken.includes('...')))) apiToken = retained.apiToken;
+	if (typeof apiToken !== 'string' || !apiToken.trim() || apiToken.trim() === '********') throw new Error('API key or token is required');
 	const status = input.status ?? existing?.status ?? 'active';
 	if (!['active', 'disabled'].includes(status)) throw new Error('Status must be active or disabled');
-	let models = input.models ?? existing?.models ?? [];
+	let models = input.models ?? retained?.models ?? [];
 	if (typeof models === 'string') models = models.split(/[\n,]+/).map(value => value.trim()).filter(Boolean);
 	if (!Array.isArray(models) || models.some(value => typeof value !== 'string' || !value.trim())) throw new Error('Models must be an array of non-empty model IDs');
 	models = [...new Set(models.map(value => value.trim()))];
-	let baseUrl = input.baseUrl ?? existing?.baseUrl ?? PROVIDER_DEFAULT_URLS[provider] ?? '';
+	let baseUrl = input.baseUrl ?? retained?.baseUrl ?? PROVIDER_DEFAULT_URLS[provider] ?? '';
 	if (typeof baseUrl !== 'string') throw new Error('Base URL must be a string');
 	if (PROVIDER_DEFAULT_URLS[provider]) baseUrl = validateProviderBaseUrl(baseUrl.trim() || PROVIDER_DEFAULT_URLS[provider]);
 	else baseUrl = '';
-	let projectId = input.projectId ?? existing?.projectId ?? '';
+	let projectId = provider === 'antigravity' ? (input.projectId ?? retained?.projectId ?? '') : '';
 	if (typeof projectId !== 'string') throw new Error('Project ID must be a string');
 	const oauth = {};
 	for (const field of ['oauthClientId', 'oauthClientSecret']) {
-		let value = input[field] ?? existing?.[field] ?? '';
+		let value = provider === 'antigravity' ? (input[field] ?? retained?.[field] ?? '') : '';
 		if (typeof value !== 'string') throw new Error('OAuth client settings must be strings');
-		if (existing && (!value || value === '********')) value = existing[field] || '';
+		value = value.trim();
+		if (provider === 'antigravity' && retained && (!value || value === '********')) value = retained[field] || '';
+		if (value === '********') throw new Error('OAuth client settings cannot use a masked value for a new provider.');
 		oauth[field] = value.trim();
 	}
-	if (provider === 'antigravity' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountId.trim()) && !existing) throw new Error('Antigravity email is required');
+	if (provider === 'antigravity' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(accountId.trim()) && !retained) throw new Error('Antigravity email is required');
 	const account = { ...existing, ...(input.id ? { id: input.id } : {}), name: name.trim() || 'Upstream account', provider, accountId: accountId.trim(), apiToken: apiToken.trim(), baseUrl, models, status, projectId: projectId.trim(), ...oauth };
+	if (providerChanged) for (const field of ['refreshToken', 'apiKey', 'source', 'projectIdentity', 'projectSource']) delete account[field];
 	if (provider === 'antigravity') {
 		// apiToken is the editable canonical credential. Legacy refreshToken must not override a replacement.
 		if (typeof input.apiToken === 'string' && input.apiToken.trim() && input.apiToken !== '********' && !input.apiToken.includes('...')) delete account.refreshToken;
-		const explicitProject = typeof input.projectId === 'string' && input.projectId.trim() && input.projectId.trim() !== (existing?.projectId || '');
-		account.projectSource = explicitProject ? 'manual' : (account.projectId ? (existing?.projectSource || 'auto') : 'auto');
+		const explicitProject = typeof input.projectId === 'string' && input.projectId.trim() && input.projectId.trim() !== (retained?.projectId || '');
+		account.projectSource = explicitProject ? 'manual' : (account.projectId ? (retained?.projectSource || 'auto') : 'auto');
 		const identity = value => JSON.stringify([value?.accountId?.toLowerCase(), value?.refreshToken || value?.apiToken, value?.oauthClientId || '', value?.oauthClientSecret || '']);
 		if (existing && identity(account) !== identity(existing) && account.projectSource !== 'manual') {
 			account.projectId = '';
@@ -842,6 +932,7 @@ async function callOpenAICompatibleAPI(cfPayload, env, stream, clientSignal) {
 			let url, body = payload;
 			const headers = { 'Content-Type': 'application/json', Accept: stream ? 'text/event-stream' : 'application/json' };
 			if (provider === 'cloudflare') {
+				validateToolStrictness(payload.tools, 'cloudflare');
 				cloudflareModelPath(route.model);
 				body = sanitizeOpenAIUpstreamPayload(payload);
 				url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(account.accountId)}/ai/v1/chat/completions`;
@@ -854,6 +945,7 @@ async function callOpenAICompatibleAPI(cfPayload, env, stream, clientSignal) {
 				}
 				headers.Authorization = `Bearer ${account.apiToken}`;
 			} else if (provider === 'anthropic') {
+				if (_anthropicRequest) validateToolStrictness(_anthropicRequest.tools, 'anthropic', false);
 				url = upstreamEndpoint(account, provider, 'messages');
 				headers['x-api-key'] = account.apiToken;
 				headers['anthropic-version'] = '2023-06-01';
@@ -899,9 +991,43 @@ async function callOpenAICompatibleAPI(cfPayload, env, stream, clientSignal) {
 }
 
 function rejectUnsupportedGeminiSafetySettings(payload) {
-	const settings = payload.gemini_extra?.safetySettings ?? payload.gemini_extra?.safety_settings;
+	const extra = normalizeGeminiRequestFields(payload.gemini_extra || {});
+	const supportedRequestFields = ['systemInstruction', 'generationConfig', 'tools', 'toolConfig', 'safetySettings'];
+	if (Object.keys(extra).some(key => !supportedRequestFields.includes(key))) throw new TypeError('This upstream protocol cannot preserve the requested Gemini request field. Use a Gemini upstream or remove the constraint explicitly.');
+	const settings = extra.safetySettings;
 	if (settings !== undefined && (!Array.isArray(settings) || settings.length > 0)) {
 		throw Object.assign(new Error('Gemini safetySettings cannot be enforced by this upstream protocol. Use a Gemini upstream or remove the settings explicitly.'), { status: 400 });
+	}
+	const config = extra.generationConfig || {};
+	const supported = ['temperature', 'topP', 'topK', 'maxOutputTokens', 'stopSequences', 'candidateCount', 'presencePenalty', 'frequencyPenalty', 'seed', 'responseMimeType', 'responseSchema', 'responseJsonSchema', 'thinkingConfig'];
+	if (Object.keys(config).some(key => !supported.includes(key))) throw new TypeError('This upstream protocol cannot enforce the requested Gemini generationConfig field. Use a Gemini upstream or remove the constraint explicitly.');
+	if (extra.toolConfig && (Object.keys(extra.toolConfig).some(key => key !== 'functionCallingConfig')
+		|| Object.keys(extra.toolConfig.functionCallingConfig || {}).some(key => !['mode', 'allowedFunctionNames'].includes(key)))) throw new TypeError('This upstream protocol cannot enforce the requested Gemini toolConfig field.');
+	if (extra.toolConfig?.functionCallingConfig?.mode === 'VALIDATED') throw new TypeError('This upstream protocol cannot guarantee Gemini VALIDATED function calling.');
+	for (const tool of extra.tools || []) for (const fn of tool.functionDeclarations || []) {
+		if (Object.keys(fn).some(key => !['name', 'description', 'parameters', 'parametersJsonSchema'].includes(key))) throw new TypeError('This upstream protocol cannot preserve the requested Gemini function declaration field.');
+	}
+	const mimeType = config.responseMimeType;
+	if (mimeType !== undefined && !['text/plain', 'application/json'].includes(mimeType)) {
+		throw Object.assign(new Error('This upstream protocol cannot enforce the requested Gemini responseMimeType. Use a Gemini upstream or remove the format constraint explicitly.'), { status: 400 });
+	}
+	if ((config.responseSchema !== undefined || config.responseJsonSchema !== undefined) && mimeType !== 'application/json') throw new TypeError('Gemini response schemas require application/json for this upstream protocol.');
+	for (const [field, value] of Object.entries(geminiGenerationToOpenAI(config))) {
+		if (!protocolJsonEqual(payload[field], value)) throw new TypeError('Gemini generationConfig conflicts with or is missing its translated request constraint.');
+	}
+}
+
+function validateToolStrictness(tools, provider, openAI = true) {
+	for (const tool of tools || []) {
+		const strict = (openAI ? tool?.function : tool)?.strict;
+		if (strict !== undefined && typeof strict !== 'boolean') throw new TypeError('Tool strict must be a boolean.');
+		if (strict && !['openai', 'anthropic'].includes(provider)) throw new TypeError(`This ${provider} adapter cannot guarantee strict tool schemas.`);
+	}
+}
+
+function rejectAnthropicProviderTools(tools) {
+	for (const tool of tools || []) {
+		if (tool?.type != null && tool.type !== 'custom') throw Object.assign(new TypeError('Anthropic provider-defined tools require an Anthropic upstream. This adapter supports custom tools only.'), { status: 400 });
 	}
 }
 
@@ -924,6 +1050,7 @@ function sanitizeOpenAIUpstreamResponse(data) {
 
 function sanitizeOpenAIUpstreamPayload(payload) {
 	rejectUnsupportedGeminiSafetySettings(payload);
+	validateToolStrictness(payload.tools, 'openai');
 	if (payload.thinking_config !== undefined) throw Object.assign(new Error('Gemini thinking_config cannot be represented by this OpenAI adapter.'), { status: 400 });
 	const cleaned = { ...payload };
 	delete cleaned.gemini_extra;
@@ -949,12 +1076,18 @@ function sanitizeOpenAIUpstreamPayload(payload) {
 	return cleaned;
 }
 
-function openAIToAnthropicUpstreamRequest(payload) {
+function openAIToAnthropicUpstreamRequest(payload, { allowGeminiThinking = false } = {}) {
 	rejectUnsupportedGeminiSafetySettings(payload);
-	if (payload.thinking_config !== undefined) throw Object.assign(new Error('Gemini thinking_config cannot be represented by this Anthropic adapter.'), { status: 400 });
+	validateToolStrictness(payload.tools, 'anthropic');
+	for (const field of ['seed', 'presence_penalty', 'frequency_penalty', 'top_logprobs', 'reasoning_effort']) {
+		if (payload[field] !== undefined) throw Object.assign(new TypeError(`This Anthropic adapter cannot enforce ${field}.`), { status: 400 });
+	}
+	if (payload.logprobs !== undefined && payload.logprobs !== false) throw Object.assign(new TypeError('This Anthropic adapter cannot provide logprobs.'), { status: 400 });
+	if (payload.thinking_config !== undefined && !allowGeminiThinking) throw Object.assign(new Error('Gemini thinking_config cannot be represented by this Anthropic adapter.'), { status: 400 });
 	if (payload.response_format?.type === 'json_object') throw Object.assign(new Error('This Anthropic adapter requires response_format.type=json_schema for structured output; json_object is not supported.'), { status: 400 });
 	if (payload.n !== undefined && payload.n !== 1) throw Object.assign(new Error('Anthropic supports one candidate per request.'), { status: 400 });
 	const result = { model: payload.model, max_tokens: payload.max_completion_tokens ?? payload.max_tokens ?? 4096, messages: [], stream: !!payload.stream };
+	if (allowGeminiThinking && payload.thinking_config !== undefined) result.thinking_config = structuredClone(payload.thinking_config);
 	const system = [];
 	function parts(content) {
 		if (content === null || content === undefined) return [];
@@ -999,7 +1132,7 @@ function openAIToAnthropicUpstreamRequest(payload) {
 	if (system.length) result.system = system;
 	for (const field of ['temperature', 'top_p', 'top_k', 'thinking']) if (payload[field] !== undefined) result[field] = payload[field];
 	if (payload.stop !== undefined) result.stop_sequences = Array.isArray(payload.stop) ? payload.stop : [payload.stop];
-	if (Array.isArray(payload.tools)) result.tools = payload.tools.map(tool => ({ name: tool.function?.name, description: tool.function?.description || '', input_schema: tool.function?.parameters || { type: 'object', properties: {} } }));
+	if (Array.isArray(payload.tools)) result.tools = payload.tools.map(tool => ({ name: tool.function?.name, description: tool.function?.description || '', input_schema: tool.function?.parameters || { type: 'object', properties: {} }, ...(tool.function?.strict !== undefined ? { strict: tool.function.strict } : {}) }));
 	if (payload.tool_choice !== undefined) {
 		const choice = payload.tool_choice;
 		result.tool_choice = choice === 'auto' ? { type: 'auto' } : choice === 'required' ? { type: 'any' }
@@ -1012,10 +1145,11 @@ function openAIToAnthropicUpstreamRequest(payload) {
 }
 
 function anthropicFinishReason(reason) {
-	if (reason === 'max_tokens') return 'length';
+	if (reason === 'max_tokens' || reason === 'model_context_window_exceeded') return 'length';
 	if (reason === 'tool_use') return 'tool_calls';
 	if (reason === 'refusal') return 'content_filter';
-	return 'stop';
+	if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
+	throw new Error('Anthropic upstream returned an unsupported terminal state.');
 }
 
 function anthropicUpstreamUsage(usage = {}) {
@@ -1405,12 +1539,13 @@ async function resolveModelName(model, env) {
 }
 
 // 对话补全 / 文本补全 的代理处理函数
-async function handleCompletions(request, env, pathname) {
-	let body;
-	try {
-		body = await request.json();
-	} catch (e) {
-		return new Response(JSON.stringify({ error: { message: "Invalid JSON body", type: "invalid_request_error" } }), { status: 400 });
+async function handleCompletions(request, env, pathname, parsedBody) {
+	// Internal protocol adapters pass their already-bounded input directly. Reading
+	// a serialized conversion again would apply the wire limit to duplicated metadata.
+	let body = parsedBody;
+	if (body === undefined) {
+		try { body = await readRequestJson(request); }
+		catch (error) { return requestJsonErrorResponse(request, error); }
 	}
 
 	if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -1597,6 +1732,8 @@ function geminiPartsToAnthropicContent(parts, tools = [], status = 502) {
 }
 
 function convertAnthropicToOpenAI(anthropicBody) {
+	rejectAnthropicProviderTools(anthropicBody.tools);
+	validateToolStrictness(anthropicBody.tools, 'openai', false);
 	for (const field of ['thinking', 'output_config', 'output_format']) {
 		if (anthropicBody[field] !== undefined) throw Object.assign(new Error(`Anthropic ${field} cannot be represented by this cross-protocol adapter. Use an Anthropic upstream to preserve this constraint.`), { status: 400 });
 	}
@@ -1780,7 +1917,8 @@ function convertAnthropicToOpenAI(anthropicBody) {
 			function: {
 				name: tool.name,
 				description: tool.description || '',
-				parameters: tool.input_schema || {}
+				parameters: tool.input_schema || {},
+				...(tool.strict !== undefined ? { strict: tool.strict } : {})
 			}
 		}));
 	}
@@ -1809,6 +1947,7 @@ function convertAnthropicToOpenAI(anthropicBody) {
 function convertOpenAIToAnthropic(openaiResponse, originalModel) {
 	const choice = openaiResponse.choices?.[0] || {};
 	const message = choice.message || {};
+	const refused = choice.finish_reason === 'content_filter' || (typeof message.refusal === 'string' && message.refusal.length > 0);
 
 	const anthropicResponse = {
 		id: `msg_${crypto.randomUUID()}`,
@@ -1831,9 +1970,12 @@ function convertOpenAIToAnthropic(openaiResponse, originalModel) {
 			text: message.content
 		});
 	}
+	if (typeof message.refusal === 'string' && message.refusal) {
+		anthropicResponse.content.push({ type: 'text', text: message.refusal });
+	}
 
 	// tool_calls → tool_use blocks
-	if (message.tool_calls && Array.isArray(message.tool_calls)) {
+	if (!refused && message.tool_calls && Array.isArray(message.tool_calls)) {
 		for (const tc of message.tool_calls) {
 			const inputObj = parseToolArguments(tc.function?.arguments, 502);
 			anthropicResponse.content.push({
@@ -1846,13 +1988,15 @@ function convertOpenAIToAnthropic(openaiResponse, originalModel) {
 		}
 	}
 	// Keep opaque Gemini parts in their original order, including signed thinking/text.
-	if (Array.isArray(message.gemini_parts)) {
+	if (!refused && Array.isArray(message.gemini_parts)) {
 		anthropicResponse.content = geminiPartsToAnthropicContent(message.gemini_parts, message.tool_calls);
 	}
 
 	// finish_reason → stop_reason 映射
 	const finishReason = choice.finish_reason;
-	if (finishReason === 'stop') {
+	if (refused) {
+		anthropicResponse.stop_reason = 'refusal';
+	} else if (finishReason === 'stop') {
 		anthropicResponse.stop_reason = 'end_turn';
 	} else if (finishReason === 'tool_calls') {
 		anthropicResponse.stop_reason = 'tool_use';
@@ -1887,12 +2031,9 @@ async function handleMessages(request, env) {
 	// 解析请求体
 	let anthropicBody;
 	try {
-		anthropicBody = await request.json();
+		anthropicBody = await readRequestJson(request);
 	} catch (e) {
-		return new Response(JSON.stringify({
-			type: 'error',
-			error: { type: 'invalid_request_error', message: 'Invalid JSON body.' }
-		}), { status: 400, headers: { 'Content-Type': 'application/json' } });
+		return requestJsonErrorResponse(request, e);
 	}
 
 	// 基本参数校验
@@ -1998,6 +2139,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 	let contentFinished = false;
 	let finalized = false;
 	let finishReason = null;
+	let refused = false;
 	let inputTokens = 0;
 	let outputTokens = 0;
 	let enqueuedAny = false;
@@ -2067,7 +2209,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 
 	function finishContent(controller) {
 		if (contentFinished) return;
-		if (finishReason !== 'length') for (const tool of tools.values()) parseToolArguments(tool.chunks.join(''), 502);
+		if (finishReason !== 'length' && !refused) for (const tool of tools.values()) parseToolArguments(tool.chunks.join(''), 502);
 		contentFinished = true;
 		closeText(controller);
 		closeThinking(controller);
@@ -2078,7 +2220,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 		// OpenAI may interleave tools, while Anthropic consumers expect complete blocks.
 		// Stream the first tool immediately and buffer later tools until their input is complete.
 		for (const [, tool] of [...tools.entries()].sort(([a], [b]) => a - b)) {
-			if (tool === streamedTool) continue;
+			if (tool === streamedTool || refused) continue;
 			startTool(controller, tool);
 			sendToolArguments(controller, tool);
 			stopBlock(controller, tool.blockIndex);
@@ -2095,7 +2237,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 		if (!finishReason) throw new Error('Upstream stream ended before a finish reason.');
 		startMessage(controller);
 		finishContent(controller);
-		const stopReason = finishReason === 'length' ? 'max_tokens'
+		const stopReason = refused ? 'refusal' : finishReason === 'length' ? 'max_tokens'
 			: finishReason === 'tool_calls' || (!finishReason && tools.size) ? 'tool_use'
 			: 'end_turn';
 		emit(controller, {
@@ -2129,6 +2271,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 		const choice = chunk.choices?.[0];
 		if (!choice) return;
 		const delta = choice.delta || {};
+		if (choice.finish_reason === 'content_filter' || (typeof delta.refusal === 'string' && delta.refusal)) refused = true;
 		if (!contentFinished) {
 			if (Array.isArray(delta.gemini_parts)) {
 				let callIndex = 0;
@@ -2136,6 +2279,7 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 					startMessage(controller); closeText(controller);
 					if (!part.thought) closeThinking(controller);
 					if (part.functionCall) {
+						if (refused) continue;
 						const tc = delta.tool_calls?.[callIndex++];
 						const input = parseToolArguments(part.functionCall.args, 502), index = nextBlockIndex++;
 						emit(controller, { type: 'content_block_start', index, content_block: { type: 'tool_use', id: tc?.id || part.functionCall.id || `toolu_${crypto.randomUUID()}`, name: part.functionCall.name, input: {}, ...(part.thoughtSignature ? { thoughtSignature: part.thoughtSignature } : {}) } });
@@ -2161,7 +2305,11 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 				if (tools.size) trailingText += delta.content;
 				else sendText(controller, delta.content);
 			}
-			if (!Array.isArray(delta.gemini_parts) && Array.isArray(delta.tool_calls)) {
+			if (typeof delta.refusal === 'string' && delta.refusal) {
+				if (tools.size) trailingText += delta.refusal;
+				else sendText(controller, delta.refusal);
+			}
+			if (!refused && !Array.isArray(delta.gemini_parts) && Array.isArray(delta.tool_calls)) {
 				startMessage(controller);
 				for (const tc of delta.tool_calls) {
 					const index = tc.index ?? 0;
@@ -2234,11 +2382,50 @@ function anthropicStreamTransform(upstreamBody, modelName, originalMessages) {
 }
 
 // 向量嵌入（Embeddings）的代理处理函数
-async function handleEmbeddings(request, env) {
- let body;
- try { body = await request.json(); } catch (_) { return Response.json({ error: { message: 'Invalid JSON body', type: 'invalid_request_error' } }, { status: 400 }); }
+function normalizeEmbeddingOptions(input) {
+ if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Embedding request must be an object.');
+ const tasks = ['TASK_TYPE_UNSPECIFIED', 'RETRIEVAL_QUERY', 'RETRIEVAL_DOCUMENT', 'SEMANTIC_SIMILARITY', 'CLASSIFICATION', 'CLUSTERING', 'QUESTION_ANSWERING', 'FACT_VERIFICATION', 'CODE_RETRIEVAL_QUERY'];
+ const aliases = {
+  title: ['title'], taskType: ['taskType', 'task_type'],
+  outputDimensionality: ['outputDimensionality', 'output_dimensionality', 'dimensions'],
+  autoTruncate: ['autoTruncate', 'auto_truncate'], documentOcr: ['documentOcr', 'document_ocr'],
+  audioTrackExtraction: ['audioTrackExtraction', 'audio_track_extraction']
+ };
+ const allowed = new Set(Object.values(aliases).flat()), result = {};
+ const sources = [input];
+ for (const field of ['embedContentConfig', 'embed_content_config']) if (Object.hasOwn(input, field)) {
+  const config = input[field];
+  if (!config || typeof config !== 'object' || Array.isArray(config) || Object.keys(config).some(key => !allowed.has(key))) throw new TypeError('Invalid or unsupported embedding configuration.');
+  sources.push(config);
+ }
+ for (const [field, names] of Object.entries(aliases)) for (const source of sources) for (const name of names) if (Object.hasOwn(source, name)) {
+  let value = source[name];
+  if (value === undefined) continue;
+  if (field === 'taskType' && Number.isInteger(value) && value >= 0 && value < tasks.length) value = tasks[value];
+  if (Object.hasOwn(result, field) && result[field] !== value) throw new TypeError('Conflicting embedding configuration aliases.');
+  result[field] = value;
+ }
+ if (result.outputDimensionality !== undefined && (!Number.isInteger(result.outputDimensionality) || result.outputDimensionality <= 0)) throw new TypeError('Embedding dimensionality must be a positive integer.');
+ if (result.taskType !== undefined) {
+  if (!tasks.includes(result.taskType)) throw new TypeError('Unsupported embedding task type.');
+ }
+ if (result.title !== undefined && typeof result.title !== 'string') throw new TypeError('Embedding title must be a string.');
+ if (result.title !== undefined && result.taskType !== 'RETRIEVAL_DOCUMENT') throw new TypeError('Embedding title requires RETRIEVAL_DOCUMENT task type.');
+ for (const field of ['autoTruncate', 'documentOcr', 'audioTrackExtraction']) if (result[field] !== undefined && typeof result[field] !== 'boolean') throw new TypeError('Embedding configuration flags must be booleans.');
+ return result;
+}
+
+async function handleEmbeddings(request, env, parsedBody) {
+ let body = parsedBody;
+ if (body === undefined) {
+  try { body = await readRequestJson(request); } catch (error) { return requestJsonErrorResponse(request, error); }
+ }
  if (!body || typeof body !== 'object' || Array.isArray(body)) return Response.json({ error: { message: 'Request body must be an object', type: 'invalid_request_error' } }, { status: 400 });
- const { model, input, encoding_format = 'float', dimensions } = body;
+ const { model, input, encoding_format = 'float' } = body;
+ let embeddingOptions;
+ try { embeddingOptions = normalizeEmbeddingOptions(body); }
+ catch (error) { return Response.json({ error: { message: error.message, type: 'invalid_request_error' } }, { status: 400 }); }
+ const dimensions = embeddingOptions.outputDimensionality;
  const inputValid = typeof input === 'string' ? input.length > 0 : Array.isArray(input) && input.length > 0 &&
   (input.every(value => typeof value === 'string' && value.length > 0) || input.every(Number.isInteger) || input.every(value => Array.isArray(value) && value.length && value.every(Number.isInteger)));
  if (!inputValid || !['float', 'base64'].includes(encoding_format) || (dimensions !== undefined && (!Number.isInteger(dimensions) || dimensions <= 0))) {
@@ -2248,6 +2435,7 @@ async function handleEmbeddings(request, env) {
  if (!target) return Response.json({ error: { message: 'Model not found: ' + model, type: 'invalid_request_error', param: 'model', code: 'model_not_found' } }, { status: 400 });
  const accounts = await getAccounts(env), route = parseUpstreamTarget(target, accounts);
  if (!['cloudflare', 'openai', 'gemini'].includes(route.provider)) return Response.json({ error: { message: 'This upstream does not support embeddings.', type: 'invalid_request_error' } }, { status: 400 });
+ if (route.provider !== 'gemini' && Object.keys(embeddingOptions).some(field => field !== 'outputDimensionality')) return Response.json({ error: { message: 'This upstream cannot enforce the requested Gemini embedding configuration.', type: 'invalid_request_error' } }, { status: 400 });
  const matches = getMatchingUpstreamAccounts(route, accounts);
  if (!matches.length) return Response.json({ error: { message: 'No active upstream account matches this embedding model.', type: 'server_error' } }, { status: 503 });
  const texts = typeof input === 'string' ? [input] : input;
@@ -2267,7 +2455,7 @@ async function handleEmbeddings(request, env) {
    } else {
     const name = route.model.replace(/^models\//, '');
     url = upstreamEndpoint(account, 'gemini', 'models/' + encodeURIComponent(name) + ':batchEmbedContents'); headers['x-goog-api-key'] = account.apiToken;
-    payload = { requests: texts.map(text => ({ model: 'models/' + name, content: { parts: [{ text }] }, ...(dimensions === undefined ? {} : { outputDimensionality: dimensions }), ...(body.task_type || body.taskType ? { taskType: body.task_type || body.taskType } : {}), ...(body.title ? { title: body.title } : {}) })) };
+    payload = { requests: texts.map(text => ({ model: 'models/' + name, content: { parts: [{ text }] }, ...(Object.keys(embeddingOptions).length ? { embedContentConfig: embeddingOptions } : {}) })) };
    }
    const response = await fetchUpstream(url, { headers, body: JSON.stringify(payload), signal: request.signal });
    if (!response.ok) { failure = await upstreamFailure(response, account); if (!shouldRetryUpstream(response.status)) break; continue; }
@@ -2282,12 +2470,41 @@ async function handleEmbeddings(request, env) {
     const tokens = data.usageMetadata?.promptTokenCount ?? data.usageMetadata?.totalTokenCount ?? texts.reduce((sum, text) => sum + Math.ceil(text.length / 4), 0);
     usage = { prompt_tokens: tokens, total_tokens: tokens };
    }
-   if (!Array.isArray(embeddings)) throw new Error('Invalid embedding output.');
-   embeddings = embeddings.map(item => ({ ...item, embedding: encoding_format === 'base64' && Array.isArray(item.embedding) ? encodeFloatEmbedding(item.embedding) : item.embedding }));
+   const expectedCount = typeof input === 'string' || input.every(Number.isInteger) ? 1 : input.length;
+   embeddings = validateEmbeddingOutput(embeddings, expectedCount, encoding_format, dimensions);
    return Response.json({ object: 'list', data: embeddings, model, usage });
   } catch (error) { if (error.status === 400) return Response.json({ error: { message: error.message, type: 'invalid_request_error' } }, { status: 400 }); return Response.json({ error: { message: request.signal.aborted ? 'Request cancelled.' : 'Unable to obtain a valid embedding response. The request was not repeated.' } }, { status: request.signal.aborted ? 499 : 502 }); }
  }
  return Response.json({ error: { message: failure.error, type: failure.status === 400 ? 'invalid_request_error' : 'server_error' } }, { status: failure.status });
+}
+
+function validateEmbeddingOutput(embeddings, expectedCount, encoding, dimensions) {
+ if (!Array.isArray(embeddings) || embeddings.length !== expectedCount) throw new Error('Invalid embedding output.');
+ const indices = new Set();
+ let vectorLength = dimensions;
+ const result = embeddings.map(item => {
+  if (!item || !Number.isInteger(item.index) || item.index < 0 || item.index >= expectedCount || indices.has(item.index)) throw new Error('Invalid embedding index.');
+  indices.add(item.index);
+  const vector = item.embedding;
+  let length, encoded;
+  if (typeof vector === 'string' && encoding === 'base64') {
+   if (!vector || vector.length % 4 || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(vector)) throw new Error('Invalid base64 embedding.');
+   const binary = atob(vector);
+   if (!binary.length || binary.length % 4 || btoa(binary) !== vector) throw new Error('Invalid base64 embedding.');
+   const bytes = Uint8Array.from(binary, value => value.charCodeAt(0)), view = new DataView(bytes.buffer);
+   for (let offset = 0; offset < bytes.length; offset += 4) if (!Number.isFinite(view.getFloat32(offset, true))) throw new Error('Invalid embedding vector.');
+   length = bytes.length / 4;
+   encoded = vector;
+  } else {
+   if (!Array.isArray(vector) || !vector.length || vector.some(value => typeof value !== 'number' || !Number.isFinite(value) || !Number.isFinite(Math.fround(value)))) throw new Error('Invalid embedding vector.');
+   length = vector.length;
+   if (encoding === 'base64') encoded = encodeFloatEmbedding(vector);
+  }
+  if (vectorLength === undefined) vectorLength = length;
+  if (length !== vectorLength) throw new Error('Invalid embedding dimensions.');
+  return { object: 'embedding', index: item.index, embedding: encoded ?? vector };
+ });
+ return result.sort((left, right) => left.index - right.index);
 }
 
 function encodeFloatEmbedding(embedding) {
@@ -2630,6 +2847,7 @@ function isThinkingModel(model) {
 
 // 运行时内存缓存（单 Worker 实例内复用）
 const antigravityTokenCache = new Map();
+const antigravityTokenRefreshes = new Map();
 const antigravitySignatureCache = new Map();
 const antigravityProjectCache = new Map();
 // Public installed-app client used by Antigravity/CLIProxyAPI; this is not a user credential.
@@ -2772,6 +2990,9 @@ async function antigravityTokenCacheKey(account, env) {
 async function getAntigravityToken(account, env, { forceRefresh = false } = {}) {
 	if (!account.refreshToken && typeof account.apiKey === 'string' && account.apiKey.trim()) return account.apiKey.trim();
 	const cacheKey = await antigravityTokenCacheKey(account, env);
+	// A forced refresh bypasses completed cache entries, but joins a refresh
+	// already running for the same credential and OAuth client fingerprint.
+	if (antigravityTokenRefreshes.has(cacheKey)) return antigravityTokenRefreshes.get(cacheKey);
 	const cached = antigravityTokenCache.get(cacheKey);
 	if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
 		return cached.token;
@@ -2780,7 +3001,13 @@ async function getAntigravityToken(account, env, { forceRefresh = false } = {}) 
 	if (!account.refreshToken) {
 		throw new Error(`Account ${account.accountId} has neither refreshToken nor apiKey`);
 	}
+	const refresh = refreshAntigravityToken(account, env, cacheKey);
+	antigravityTokenRefreshes.set(cacheKey, refresh);
+	try { return await refresh; }
+	finally { if (antigravityTokenRefreshes.get(cacheKey) === refresh) antigravityTokenRefreshes.delete(cacheKey); }
+}
 
+async function refreshAntigravityToken(account, env, cacheKey) {
 	const { id: clientId, secret: clientSecret } = antigravityOAuthClient(account, env);
 
 	const resp = await fetch('https://oauth2.googleapis.com/token', {
@@ -2942,6 +3169,8 @@ async function deriveAntigravitySessionId(messages) {
 }
 
 async function buildAntigravityCloudCodeRequest(anthropicRequest, projectId) {
+	rejectAnthropicProviderTools(anthropicRequest.tools);
+	validateToolStrictness(anthropicRequest.tools, 'Antigravity', false);
 	if (typeof projectId !== 'string' || !projectId.trim()) throw Object.assign(new Error('Antigravity requires an authorized projectId on the account or ANTIGRAVITY_PROJECT_ID.'), { status: 400 });
 	const invalid = message => { throw Object.assign(new Error(message), { status: 400 }); };
 	if (anthropicRequest.output_config?.format || anthropicRequest.output_format || anthropicRequest.response_format) {
@@ -3115,9 +3344,9 @@ function convertOpenAIReqToAnthropic(openaiRequest) {
 	if (openaiRequest.response_format && openaiRequest.response_format.type !== 'text') {
 		throw Object.assign(new Error('This Antigravity adapter cannot guarantee structured JSON output. Remove response_format or use a compatible upstream.'), { status: 400 });
 	}
-	const { thinking_config, ...standardRequest } = openaiRequest;
-	const request = openAIToAnthropicUpstreamRequest(standardRequest);
-	if (thinking_config !== undefined) request.thinking_config = structuredClone(thinking_config);
+	let request;
+	try { request = openAIToAnthropicUpstreamRequest(openaiRequest, { allowGeminiThinking: true }); }
+	catch (error) { if (error instanceof TypeError) error.status = 400; throw error; }
 	// Preserve explicit signatures so a second Worker isolate can replay tool history.
 	const originalTools = new Map();
 	for (const message of openaiRequest.messages || []) for (const tool of message.tool_calls || []) originalTools.set(tool.id, tool);
@@ -3606,7 +3835,7 @@ async function handleAntigravityCompletions(openaiBody, env, targetModel, isLega
 // 后台管理面板的 API 接口处理函数
 // ----------------------------------------------------
 function geminiError(message, code = 400) {
-	const statuses = { 400: 'INVALID_ARGUMENT', 401: 'UNAUTHENTICATED', 403: 'PERMISSION_DENIED', 404: 'NOT_FOUND', 405: 'METHOD_NOT_ALLOWED', 429: 'RESOURCE_EXHAUSTED', 501: 'UNIMPLEMENTED', 503: 'UNAVAILABLE' };
+	const statuses = { 400: 'INVALID_ARGUMENT', 401: 'UNAUTHENTICATED', 403: 'PERMISSION_DENIED', 404: 'NOT_FOUND', 405: 'METHOD_NOT_ALLOWED', 413: 'RESOURCE_EXHAUSTED', 429: 'RESOURCE_EXHAUSTED', 499: 'CANCELLED', 501: 'UNIMPLEMENTED', 503: 'UNAVAILABLE' };
 	return Response.json({ error: { code, message, status: statuses[code] || 'INTERNAL' } }, { status: code });
 }
 
@@ -3644,20 +3873,21 @@ async function handleGeminiEndpoint(request, env) {
 	if (!model || !action) return geminiError('Path not found.', 404);
 	if (action === 'countTokens') return geminiError('Exact token counting is not available across upstream protocols.', 501);
 	let body;
-	try { body = await request.json(); } catch (_) { return geminiError('Invalid JSON body.'); }
+	try { body = await readRequestJson(request); } catch (error) { return requestJsonErrorResponse(request, error); }
 	if (!body || typeof body !== 'object' || Array.isArray(body)) return geminiError('Request body must be an object.');
 	try {
 		if (action === 'embedContent' || action === 'batchEmbedContents') {
 			const items = action === 'batchEmbedContents' ? body.requests : [body];
 			if (!Array.isArray(items) || !items.length) return geminiError('Embedding requests must be a non-empty array.');
+			if (action === 'batchEmbedContents' && Object.keys(normalizeEmbeddingOptions(body)).length) return geminiError('Put embedding configuration on each batch request.');
+			const configurations = items.map(normalizeEmbeddingOptions), options = configurations[0];
+			if (configurations.some(config => !protocolJsonEqual(config, options))) return geminiError('Batch embedding options must match.');
 			const input = items.map(item => {
 				if (item.model && item.model !== `models/${model}` && item.model !== model) throw new TypeError('All embedding requests must use the path model.');
 				if (!Array.isArray(item.content?.parts) || !item.content.parts.length || item.content.parts.some(part => typeof part.text !== 'string')) throw new TypeError('Embeddings require text content parts.');
 				return item.content.parts.map(part => part.text).join('\n');
 			});
-			const options = items[0];
-			if (items.some(item => item.taskType !== options.taskType || item.title !== options.title || item.outputDimensionality !== options.outputDimensionality)) return geminiError('Batch embedding options must match.');
-			const response = await handleEmbeddings(new Request(new URL('/v1/embeddings', url), { method: 'POST', signal: request.signal, body: JSON.stringify({ model, input, task_type: options.taskType, title: options.title, dimensions: options.outputDimensionality }) }), env);
+			const response = await handleEmbeddings(request, env, { model, input, embedContentConfig: options });
 			const data = await response.json();
 			if (!response.ok) return geminiError(data.error?.message || 'Embedding request failed.', response.status);
 			const embeddings = data.data.map(item => ({ values: item.embedding }));
@@ -3665,7 +3895,7 @@ async function handleGeminiEndpoint(request, env) {
 		}
 		const payload = geminiToOpenAIRequest(body, model);
 		payload.stream = action === 'streamGenerateContent';
-		const response = await handleCompletions(new Request(new URL('/v1/chat/completions', url), { method: 'POST', signal: request.signal, body: JSON.stringify(payload) }), env, '/v1/chat/completions');
+		const response = await handleCompletions(request, env, '/v1/chat/completions', payload);
 		if (!response.ok) {
 			const error = await response.json();
 			return geminiError(error.error?.message || 'Generation failed.', response.status);
@@ -3677,7 +3907,7 @@ async function handleGeminiEndpoint(request, env) {
 		return Response.json(openAIToGeminiResponse(await response.json(), model));
 	} catch (error) {
 		if (error instanceof TypeError || error.status === 400) return geminiError(error.message);
-		console.error('Gemini request failed:', error.message);
+		console.error('Gemini request failed: upstream_error');
 		return geminiError('Upstream request failed.', 502);
 	}
 }
@@ -3705,7 +3935,7 @@ async function handleDashboardApi(request, env, ctx) {
 	if (url.pathname === '/api/auth/login' && method === 'POST') {
 		if (request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) return Response.json({ error: 'Origin not allowed' }, { status: 403 });
 		let payload;
-		try { payload = await request.json(); } catch (_) { return Response.json({ error: 'Invalid login payload' }, { status: 400 }); }
+		try { payload = await readRequestJson(request, LOGIN_JSON_LIMIT); } catch (error) { return requestJsonErrorResponse(request, error); }
 		if (typeof payload?.password !== 'string' || payload.password.length > 4096) return Response.json({ error: 'Invalid login payload' }, { status: 400 });
 		const ipKey = await sha256('admin-login:' + (request.headers.get('CF-Connecting-IP') || 'local'));
 		const result = await adminSessionRequest(env, { type: 'login', password: payload.password, ipKey }, request);
@@ -3754,7 +3984,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		if (method === 'POST') {
-			const payload = await request.json();
+			const payload = await readRequestJson(request, ADMIN_JSON_LIMIT);
 			const existing = payload?.id ? (await getAccounts(env)).find(account => account.id === payload.id) : undefined;
 			if (payload?.id && !existing) return Response.json({ error: 'Account not found' }, { status: 404 });
 			let account;
@@ -3777,7 +4007,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		if (method === 'DELETE') {
-			const { id } = await request.json();
+			const { id } = await readRequestJson(request, ADMIN_JSON_LIMIT);
 			await configRequest(env, { type: 'account.delete', id });
 			return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
 		}
@@ -3785,7 +4015,7 @@ async function handleDashboardApi(request, env, ctx) {
 
 	// 7. 测试账号是否能正常连接
 	if (url.pathname === '/api/accounts/test' && method === 'POST') {
-		const payload = await request.json();
+		const payload = await readRequestJson(request, ADMIN_JSON_LIMIT);
 		const existing = payload?.id ? (await getAccounts(env)).find(account => account.id === payload.id) : undefined;
 		if (payload?.id && !existing) return Response.json({ success: false, error: 'Account not found' }, { status: 404 });
 		let account;
@@ -3815,12 +4045,15 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 		const targetAccountId = account.accountId;
 		const targetApiToken = account.apiToken;
+		const fetchConnectionTest = (target, options) => fetchUpstream(target, { ...options, signal: request.signal }, {
+			headerTimeoutMs: 15000, bodyIdleTimeoutMs: 15000, maxResponseBytes: 1024 * 1024
+		});
 
 		const [readResult, editResult, analyticsResult] = await Promise.all([
 			// 1. Workers AI > Read
 			(async () => {
 				try {
-					const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/models/search?limit=1`, {
+					const res = await fetchConnectionTest(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(targetAccountId)}/ai/models/search?limit=1`, {
 						method: 'GET',
 						headers: {
 							'Authorization': `Bearer ${targetApiToken}`,
@@ -3831,15 +4064,15 @@ async function handleDashboardApi(request, env, ctx) {
 					if (res.ok && data.success !== false) {
 						return { success: true };
 					}
-					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+					return { success: false, error: cleanUpstreamError(data.errors?.[0]?.message || `HTTP ${res.status}`, account) };
 				} catch (e) {
-					return { success: false, error: e.message };
+					return { success: false, error: cleanUpstreamError(e.message, account) };
 				}
 			})(),
 			// 2. Workers AI > Edit
 			(async () => {
 				try {
-					const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${targetAccountId}/ai/run/@cf/google/embeddinggemma-300m`, {
+					const res = await fetchConnectionTest(`https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(targetAccountId)}/ai/run/@cf/google/embeddinggemma-300m`, {
 						method: 'POST',
 						headers: {
 							'Authorization': `Bearer ${targetApiToken}`,
@@ -3851,9 +4084,9 @@ async function handleDashboardApi(request, env, ctx) {
 					if (res.ok && data.success !== false) {
 						return { success: true };
 					}
-					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+					return { success: false, error: cleanUpstreamError(data.errors?.[0]?.message || `HTTP ${res.status}`, account) };
 				} catch (e) {
-					return { success: false, error: e.message };
+					return { success: false, error: cleanUpstreamError(e.message, account) };
 				}
 			})(),
 			// 3. Account Analytics > Read
@@ -3877,7 +4110,7 @@ async function handleDashboardApi(request, env, ctx) {
 					todayUTC.setUTCHours(0, 0, 0, 0);
 					const startToday = todayUTC.toISOString().split('.')[0] + 'Z';
 
-					const res = await fetch(`https://api.cloudflare.com/client/v4/graphql`, {
+					const res = await fetchConnectionTest(`https://api.cloudflare.com/client/v4/graphql`, {
 						method: 'POST',
 						headers: {
 							'Authorization': `Bearer ${targetApiToken}`,
@@ -3895,9 +4128,9 @@ async function handleDashboardApi(request, env, ctx) {
 					if (res.ok && !data.errors && data.data?.viewer?.accounts) {
 						return { success: true };
 					}
-					return { success: false, error: data.errors?.[0]?.message || `HTTP ${res.status}` };
+					return { success: false, error: cleanUpstreamError(data.errors?.[0]?.message || `HTTP ${res.status}`, account) };
 				} catch (e) {
-					return { success: false, error: e.message };
+					return { success: false, error: cleanUpstreamError(e.message, account) };
 				}
 			})()
 		]);
@@ -3967,7 +4200,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		if (method === 'POST') {
-			const { name, key } = await request.json();
+			const { name, key } = await readRequestJson(request, ADMIN_JSON_LIMIT);
 			if (typeof name !== 'string' || !name || (key !== undefined && typeof key !== 'string')) {
 				return new Response(JSON.stringify({ error: 'Name is required' }), { status: 400 });
 			}
@@ -3983,7 +4216,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		if (method === 'DELETE') {
-			const { id } = await request.json();
+			const { id } = await readRequestJson(request, ADMIN_JSON_LIMIT);
 			await configRequest(env, { type: 'key.delete', id });
 			return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
 		}
@@ -3997,7 +4230,7 @@ async function handleDashboardApi(request, env, ctx) {
 		}
 
 		if (method === 'POST') {
-			const { customModelMap } = await request.json();
+			const { customModelMap } = await readRequestJson(request, ADMIN_JSON_LIMIT);
 			if (!customModelMap || typeof customModelMap !== 'object' || Array.isArray(customModelMap)
 				|| Object.values(customModelMap).some(value => typeof value !== 'string' || !value.trim())) {
 				return new Response(JSON.stringify({ error: 'Invalid customModelMap payload' }), { status: 400 });
@@ -4061,6 +4294,7 @@ function gatewayChartRuntime() {
 }
 
 function secureHtmlResponse(html) {
+	html = html.replace('</head>', `<style>${PROJECT_BRAND_CSS}</style></head>`);
 	const nonce = crypto.randomUUID().replace(/-/g, '');
 	const handlers = [];
 	// Convert only authored markup, never script string contents, to nonce-bound listeners.
@@ -4333,10 +4567,7 @@ async function handleLandingPage(request, env, ctx) {
 <body>
 
 	<header class="site-header">
-		<div class="brand">
-			<div class="logo-icon">${PROJECT_ICON_SVG}</div>
-			<div><div class="logo-text">${PROJECT_DISPLAY_NAME}</div><div class="brand-tag">API GATEWAY</div></div>
-		</div>
+		${projectBrandMarkup()}
 	<div class="action-btn-group">
 		<button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
 			<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
@@ -5061,8 +5292,7 @@ function handleAdminPage(request, env, ctx) {
 	<!-- App Header for Mobile Toggle -->
 	<div style="display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; background-color: var(--sidebar-bg); border-bottom: 1px solid var(--border-color); z-index: 90;" class="mobile-header">
 		<div class="logo-area" style="margin-bottom: 0;">
-			<div class="logo-icon">${PROJECT_ICON_SVG}</div>
-			<span class="logo-text">${PROJECT_DISPLAY_NAME}</span>
+			${projectBrandMarkup()}
 		</div>
 		<div style="display: flex; align-items: center; gap: 12px;">
 			<button class="mobile-nav-toggle" onclick="toggleSidebar()">
@@ -5076,8 +5306,7 @@ function handleAdminPage(request, env, ctx) {
 		<!-- Sidebar -->
 		<aside id="sidebar">
 			<div class="logo-area">
-				<div class="logo-icon">${PROJECT_ICON_SVG}</div>
-				<span class="logo-text">${PROJECT_DISPLAY_NAME}</span>
+				${projectBrandMarkup()}
 			</div>
 
 			<div class="workspace-caption">WORKSPACE</div>
@@ -6068,7 +6297,11 @@ function handleAdminPage(request, env, ctx) {
 			}
 		}
 
+		let accountCredentialReusable = false;
+		let lastAccountProvider = null;
 		function openAddAccountModal() {
+			accountCredentialReusable = false;
+			lastAccountProvider = 'cloudflare';
 			document.getElementById('account-modal-title').innerText = '添加上游账号';
 			document.getElementById('account-id-edit').value = '';
 			document.getElementById('account-provider').value = 'cloudflare';
@@ -6094,6 +6327,8 @@ function handleAdminPage(request, env, ctx) {
 		}
 
 		function editAccount(id, name, accountId, apiToken, account = {}) {
+			accountCredentialReusable = true;
+			lastAccountProvider = account.provider || 'cloudflare';
 			document.getElementById('account-modal-title').innerText = '编辑上游账号';
 			document.getElementById('account-id-edit').value = id;
 			document.getElementById('account-name').value = name;
@@ -6133,6 +6368,11 @@ function handleAdminPage(request, env, ctx) {
 
 		function onProviderChange() {
 			const provider = document.getElementById('account-provider').value;
+			if (lastAccountProvider && lastAccountProvider !== provider) {
+				accountCredentialReusable = false;
+				for (const id of ['account-token', 'account-id', 'account-base-url', 'account-models', 'account-project-id', 'account-oauth-client-id', 'account-oauth-client-secret']) document.getElementById(id).value = '';
+			}
+			lastAccountProvider = provider;
 			const defaults = ${JSON.stringify(PROVIDER_DEFAULT_URLS)};
 			const generic = Object.prototype.hasOwnProperty.call(defaults, provider);
 			document.getElementById('account-id-group').classList.toggle('hidden', provider !== 'cloudflare' && provider !== 'antigravity');
@@ -6143,15 +6383,20 @@ function handleAdminPage(request, env, ctx) {
 			document.getElementById('account-id-label').textContent = provider === 'antigravity' ? '邮箱 (email)' : 'Account ID';
 			document.getElementById('account-id').placeholder = provider === 'antigravity' ? '你的 Antigravity 登录邮箱' : '获取于 CF 控制台 Workers AI 页面';
 			document.getElementById('account-token-label').textContent = provider === 'antigravity' ? 'Refresh Token (refresh_token)' : 'API Key / Token';
-			document.getElementById('account-token').placeholder = provider === 'antigravity' ? '粘贴 refresh_token；编辑时留空保留原值' : '输入 API Key / Token；编辑时留空保留原值';
+			document.getElementById('account-token').placeholder = accountCredentialReusable ? '同一上游类型编辑时可留空保留原值' : '请填写此上游的凭据；更换类型后必须重新填写';
 			document.getElementById('account-test-note').textContent = provider === 'cloudflare' ? 'Cloudflare 测试会发起一次小型向量请求，占用少量模型配额；保存账号无需测试。' : provider === 'antigravity' ? '测试会刷新登录并查询项目，不生成模型内容。' : '测试只查询可用模型，不生成模型内容。';
 			if (generic) document.getElementById('account-base-url').placeholder = defaults[provider];
 			onAccountInfoChange();
 		}
 
+		function accountFormHasCredential(account) {
+			const value = account.apiToken.trim();
+			return (value && value !== '********' && !value.includes('...')) || (account.id && accountCredentialReusable);
+		}
+
 		function onAccountInfoChange() {
 			const account = readAccountForm();
-			document.getElementById('btn-save-account').disabled = !(account.apiToken || account.id) || (['cloudflare', 'antigravity'].includes(account.provider) && !account.accountId.trim());
+			document.getElementById('btn-save-account').disabled = !accountFormHasCredential(account) || (['cloudflare', 'antigravity'].includes(account.provider) && !account.accountId.trim());
 			document.getElementById('test-result-alert').style.display = 'none';
 			document.getElementById('perm-wa-read').innerHTML = '';
 			document.getElementById('perm-wa-edit').innerHTML = '';
@@ -6282,7 +6527,7 @@ function handleAdminPage(request, env, ctx) {
 
 		async function saveAccount() {
 			const account = readAccountForm();
-			if ((!account.id && !account.apiToken) || (account.provider === 'cloudflare' && !account.accountId.trim())) {
+			if (!accountFormHasCredential(account) || (['cloudflare', 'antigravity'].includes(account.provider) && !account.accountId.trim())) {
 				showToast('请填写必需的账号信息和凭据。', 'warning');
 				return;
 			}
@@ -6881,25 +7126,85 @@ function geminiProtocolContent(parts) {
 	return out.length === 1 && out[0].type === 'text' ? out[0].text : out;
 }
 function geminiProtocolSchema(schema) {
-	if (Array.isArray(schema)) return schema.map(geminiProtocolSchema);
 	if (!schema || typeof schema !== 'object') return schema;
-	return Object.fromEntries(
-		Object.entries(schema).map(([key, value]) => [
-			key,
-			key === 'type' && typeof value === 'string' ? value.toLowerCase() : geminiProtocolSchema(value)
-		])
-	);
+	const result = structuredClone(schema);
+	if (typeof result.type === 'string') result.type = result.type.toLowerCase();
+	// Traverse schema nodes only. Defaults, constants, examples and enum values
+	// are user literals, even when they contain a property named "type".
+	for (const field of ['properties', '$defs', 'definitions', 'dependentSchemas']) if (result[field] && typeof result[field] === 'object') {
+		result[field] = Object.fromEntries(Object.entries(result[field]).map(([name, value]) => [name, geminiProtocolSchema(value)]));
+	}
+	for (const field of ['items', 'additionalProperties', 'contains', 'not', 'propertyNames', 'if', 'then', 'else']) if (result[field] !== undefined) result[field] = geminiProtocolSchema(result[field]);
+	for (const field of ['allOf', 'anyOf', 'oneOf', 'prefixItems']) if (Array.isArray(result[field])) result[field] = result[field].map(geminiProtocolSchema);
+	return result;
+}
+
+function normalizeGeminiAliases(value, aliases, label) {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`Gemini ${label} must be an object.`);
+	const result = structuredClone(value);
+	for (const [alias, canonical] of Object.entries(aliases)) if (result[alias] !== undefined) {
+		if (result[canonical] !== undefined && !protocolJsonEqual(result[canonical], result[alias])) throw new TypeError(`Conflicting Gemini ${label} aliases.`);
+		result[canonical] = result[alias]; delete result[alias];
+	}
+	return result;
+}
+
+function normalizeGeminiGenerationConfig(value) {
+	const prepared = structuredClone(value);
+	for (const field of ['thinkingConfig', 'thinking_config']) if (prepared?.[field] !== undefined) prepared[field] = normalizeGeminiAliases(prepared[field], {
+		thinking_budget: 'thinkingBudget', include_thoughts: 'includeThoughts', thinking_level: 'thinkingLevel'
+	}, 'thinkingConfig');
+	return normalizeGeminiAliases(prepared, {
+		top_p: 'topP', top_k: 'topK', max_output_tokens: 'maxOutputTokens', stop_sequences: 'stopSequences', candidate_count: 'candidateCount',
+		presence_penalty: 'presencePenalty', frequency_penalty: 'frequencyPenalty', response_mime_type: 'responseMimeType', response_schema: 'responseSchema',
+		response_json_schema: 'responseJsonSchema', thinking_config: 'thinkingConfig', response_format: 'responseFormat', image_config: 'imageConfig'
+	}, 'generationConfig');
+}
+
+function normalizeGeminiRequestFields(value) {
+	const prepared = structuredClone(value);
+	for (const field of ['generationConfig', 'generation_config']) if (prepared?.[field] !== undefined) prepared[field] = normalizeGeminiGenerationConfig(prepared[field]);
+	for (const field of ['toolConfig', 'tool_config']) if (prepared?.[field] !== undefined) {
+		const config = structuredClone(prepared[field]);
+		for (const key of ['functionCallingConfig', 'function_calling_config']) if (config?.[key] !== undefined) {
+			config[key] = normalizeGeminiAliases(config[key], { allowed_function_names: 'allowedFunctionNames', stream_function_call_arguments: 'streamFunctionCallArguments' }, 'functionCallingConfig');
+			if (typeof config[key].mode === 'string') config[key].mode = config[key].mode.toUpperCase();
+		}
+		prepared[field] = normalizeGeminiAliases(config, { function_calling_config: 'functionCallingConfig' }, 'toolConfig');
+	}
+	if (Array.isArray(prepared?.tools)) prepared.tools = prepared.tools.map(tool => {
+		const entry = structuredClone(tool);
+		for (const field of ['functionDeclarations', 'function_declarations']) if (Array.isArray(entry?.[field])) entry[field] = entry[field].map(fn => normalizeGeminiAliases(fn, {
+			parameters_json_schema: 'parametersJsonSchema', response_json_schema: 'responseJsonSchema', response_mime_type: 'responseMimeType'
+		}, 'functionDeclaration'));
+		return normalizeGeminiAliases(entry, { function_declarations: 'functionDeclarations' }, 'tool');
+	});
+	return normalizeGeminiAliases(prepared, {
+		system_instruction: 'systemInstruction', generation_config: 'generationConfig', tool_config: 'toolConfig', safety_settings: 'safetySettings',
+		cached_content: 'cachedContent', continuation_token: 'continuationToken', service_tier: 'serviceTier'
+	}, 'request');
+}
+
+function geminiGenerationToOpenAI(config) {
+	const result = {};
+	for (const [source, target] of Object.entries({ temperature: 'temperature', topP: 'top_p', topK: 'top_k', maxOutputTokens: 'max_tokens', stopSequences: 'stop', candidateCount: 'n', presencePenalty: 'presence_penalty', frequencyPenalty: 'frequency_penalty', seed: 'seed' })) {
+		if (config[source] !== undefined) result[target] = structuredClone(config[source]);
+	}
+	if (config.responseMimeType === 'application/json') {
+		if (config.responseSchema !== undefined && config.responseJsonSchema !== undefined) throw new TypeError('Gemini responseSchema and responseJsonSchema cannot both be set.');
+		const schema = config.responseJsonSchema !== undefined ? structuredClone(config.responseJsonSchema) : config.responseSchema !== undefined ? geminiProtocolSchema(config.responseSchema) : undefined;
+		result.response_format = schema !== undefined ? { type: 'json_schema', json_schema: { name: 'response', schema } } : { type: 'json_object' };
+	}
+	if (config.thinkingConfig !== undefined) result.thinking_config = structuredClone(config.thinkingConfig);
+	return result;
 }
 function geminiToOpenAIRequest(body, model) {
+	body = normalizeGeminiRequestFields(body);
 	if (!body || typeof body !== 'object' || !Array.isArray(body.contents) || !body.contents.length)
 		throw new TypeError('contents must be a non-empty array');
 	const result = { model, messages: [], gemini_extra: structuredClone(body) };
 	delete result.gemini_extra.contents;
 	delete result.gemini_extra.model;
-	for (const [snake, camel] of Object.entries({ system_instruction: 'systemInstruction', generation_config: 'generationConfig', tool_config: 'toolConfig', safety_settings: 'safetySettings' })) {
-		if (result.gemini_extra[snake] !== undefined && result.gemini_extra[camel] === undefined) result.gemini_extra[camel] = result.gemini_extra[snake];
-		delete result.gemini_extra[snake];
-	}
 	const system = body.systemInstruction || body.system_instruction;
 	if (system?.parts?.length) result.messages.push({ role: 'system', content: geminiProtocolContent(system.parts) });
 	const calls = [];
@@ -6957,31 +7262,7 @@ function geminiToOpenAIRequest(body, model) {
 			result.messages.push(message);
 		}
 	}
-	const config = body.generationConfig || body.generation_config || {};
-	for (const [source, target] of Object.entries({
-		temperature: 'temperature',
-		topP: 'top_p',
-		topK: 'top_k',
-		maxOutputTokens: 'max_tokens',
-		stopSequences: 'stop',
-		candidateCount: 'n',
-		presencePenalty: 'presence_penalty',
-		frequencyPenalty: 'frequency_penalty',
-		seed: 'seed'
-	}))
-		if (config[source] !== undefined) result[target] = config[source];
-	if (config.responseMimeType === 'application/json')
-		result.response_format =
-			config.responseJsonSchema || config.responseSchema
-				? {
-						type: 'json_schema',
-						json_schema: {
-							name: 'response',
-							schema: geminiProtocolSchema(config.responseJsonSchema || config.responseSchema)
-						}
-					}
-				: { type: 'json_object' };
-	if (config.thinkingConfig) result.thinking_config = structuredClone(config.thinkingConfig);
+	Object.assign(result, geminiGenerationToOpenAI(body.generationConfig || {}));
 	if (body.tools) {
 		result.tools = [];
 		for (const tool of body.tools) {
@@ -6997,9 +7278,7 @@ function geminiToOpenAIRequest(body, model) {
 					function: {
 						name: fn.name,
 						description: fn.description || '',
-						parameters: geminiProtocolSchema(
-							fn.parametersJsonSchema || fn.parameters || { type: 'object', properties: {} }
-						)
+						parameters: fn.parametersJsonSchema !== undefined ? structuredClone(fn.parametersJsonSchema) : geminiProtocolSchema(fn.parameters || { type: 'object', properties: {} })
 					}
 				});
 		}
@@ -7022,8 +7301,9 @@ function geminiToOpenAIRequest(body, model) {
 }
 function openAIToGeminiRequest(payload) {
 	if (!payload || !Array.isArray(payload.messages)) throw new TypeError('messages must be an array');
+	validateToolStrictness(payload.tools, 'Gemini');
 	if (payload.parallel_tool_calls === false && payload.tools?.length) throw new TypeError('This Gemini adapter cannot represent a parallel-call restriction.');
-	const body = structuredClone(payload.gemini_extra || {});
+	const body = normalizeGeminiRequestFields(payload.gemini_extra || {});
 	body.contents = [];
 	const systemParts = [],
 		names = new Map();
@@ -7167,9 +7447,11 @@ function openAIToGeminiRequest(payload) {
 function geminiFinishToOpenAI(reason, hasTools) {
 	if (!reason) return null;
 	if (reason === 'MAX_TOKENS') return 'length';
-	if (['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY'].includes(reason))
+	if (['SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'IMAGE_SAFETY', 'IMAGE_PROHIBITED_CONTENT', 'IMAGE_RECITATION', 'ESCALATION', 'PUP_LIMITED_DISABLED'].includes(reason))
 		return 'content_filter';
-	return reason === 'STOP' && hasTools ? 'tool_calls' : 'stop';
+	if (reason === 'STOP') return hasTools ? 'tool_calls' : 'stop';
+	// Malformed calls and unknown terminal states are failures, never normal EOF.
+	throw new Error('Gemini upstream did not complete generation successfully.');
 }
 function geminiUsageToOpenAI(u) {
 	if (!u) return undefined;

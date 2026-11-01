@@ -153,7 +153,7 @@ test('OpenAI and Gemini embedding upstreams preserve model routing and emit Open
  const gemini = await harness([account('gemini', { baseUrl: 'https://gemini.vendor/v1beta' })], () => Response.json({ embeddings: [{ values: [1,2] }, { values: [3,4] }], usageMetadata: { totalTokenCount: 3 } }), { vector: 'gemini:gemini-embedding-test' });
  const g = await gemini.module.handleEmbeddings(embeddingRequest({ model: 'vector', input: ['a','b'], dimensions: 2 }), gemini.env);
  assert.equal(g.status, 200); const data = await g.json(); assert.deepEqual(data.data.map(x=>x.embedding), [[1,2],[3,4]]); assert.equal(data.usage.total_tokens, 3);
- assert.equal(gemini.requests[0].url, 'https://gemini.vendor/v1beta/models/gemini-embedding-test:batchEmbedContents'); assert.equal(gemini.requests[0].options.headers['x-goog-api-key'], 'gemini-secret'); assert.equal(gemini.requests[0].body.requests[0].outputDimensionality, 2);
+ assert.equal(gemini.requests[0].url, 'https://gemini.vendor/v1beta/models/gemini-embedding-test:batchEmbedContents'); assert.equal(gemini.requests[0].options.headers['x-goog-api-key'], 'gemini-secret'); assert.equal(gemini.requests[0].body.requests[0].embedContentConfig.outputDimensionality, 2);
  const anth = await harness([account('anthropic')], () => { throw new Error('Must not call network'); }, { vector: 'anthropic:embedding' });
  assert.equal((await anth.module.handleEmbeddings(embeddingRequest({ model: 'vector', input: 'hello' }), anth.env)).status, 400);
 });
