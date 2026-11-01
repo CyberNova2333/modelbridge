@@ -1,8 +1,6 @@
-# ModelBridge
+# ![ModelBridge](assets/modelbridge-logo.svg)
 
 [简体中文](README.md) | **English**
-
-![ModelBridge](assets/modelbridge-logo.svg)
 
 ModelBridge is a multi-model, multi-protocol API gateway for Cloudflare Workers. Configure upstream accounts and model aliases, then use OpenAI, Anthropic or Gemini client interfaces to call supported models. Its blue management interface handles accounts, gateway keys and Cloudflare usage.
 

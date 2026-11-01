@@ -34,6 +34,8 @@
 
 首页、后台侧栏与移动顶栏使用 `projectBrandMarkup` 和 `PROJECT_BRAND_CSS`；内嵌 `PROJECT_ICON_SVG` 通过数据地址用于品牌图片及页签图标。仓库的 [Logo](../assets/modelbridge-logo.svg) 和[方形图标](../assets/modelbridge-icon.svg)是独立素材，修改图形要同时核对内嵌版本。当前 Worker 没有 `/assets/` 静态路由，README 的图片链接不是线上下载地址。
 
+首页将页首品牌作为唯一一级标题，不再另设大标语；后台保留各功能页标题。中英文 README 均将带字 Logo 放在唯一一级标题中，通过图片替代文字保留品牌名称，不再叠加文字标题。
+
 ## `tests/`
 
 在根目录运行 `node --test tests/*.test.mjs`。测试以公共入口或专门提取的转换器约束行为；需要 Node.js 24+、Python 3.10+ 和 Git。
