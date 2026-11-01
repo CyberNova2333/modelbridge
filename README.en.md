@@ -1,6 +1,21 @@
-# ![ModelBridge](assets/modelbridge-logo.svg)
+<h1 align="center">
+  <img src="assets/modelbridge-logo.svg" width="560" alt="ModelBridge">
+</h1>
 
-[简体中文](README.md) | **English**
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-2563eb?style=flat-square" alt="License: GPL-3.0-only"></a>
+  <a href="#quick-deployment"><img src="https://img.shields.io/badge/Cloudflare-Workers-0c5cab?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="Runtime: Cloudflare Workers"></a>
+  <a href="_worker.js"><img src="https://img.shields.io/badge/JavaScript-ES_Modules-3178c6?style=flat-square&amp;logo=javascript&amp;logoColor=white" alt="JavaScript ES Modules"></a>
+  <a href="repo-docs/modules/routing-and-protocols.md"><img src="https://img.shields.io/badge/API-OpenAI%20%7C%20Anthropic%20%7C%20Gemini-1d4ed8?style=flat-square" alt="Client APIs: OpenAI, Anthropic, Gemini"></a>
+</p>
+
+<p align="center">
+  <a href="README.md">简体中文</a> · <strong>English</strong>
+</p>
+
+<p align="center">
+  <a href="#quick-deployment">Quick deployment</a> · <a href="repo-docs/README.md">Project guide</a> · <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
 ModelBridge is a multi-model, multi-protocol API gateway for Cloudflare Workers. Configure upstream accounts and model aliases, then use OpenAI, Anthropic or Gemini client interfaces to call supported models. Its blue management interface handles accounts, gateway keys and Cloudflare usage.
 

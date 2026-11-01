@@ -1,6 +1,21 @@
-# ![模桥 ModelBridge](assets/modelbridge-logo.svg)
+<h1 align="center">
+  <img src="assets/modelbridge-logo.svg" width="560" alt="模桥 ModelBridge">
+</h1>
 
-**简体中文** | [English](README.en.md)
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0--only-2563eb?style=flat-square" alt="许可证：GPL-3.0-only"></a>
+  <a href="#快速部署"><img src="https://img.shields.io/badge/Cloudflare-Workers-0c5cab?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="运行平台：Cloudflare Workers"></a>
+  <a href="_worker.js"><img src="https://img.shields.io/badge/JavaScript-ES_Modules-3178c6?style=flat-square&amp;logo=javascript&amp;logoColor=white" alt="JavaScript ES Modules"></a>
+  <a href="repo-docs/modules/routing-and-protocols.md"><img src="https://img.shields.io/badge/API-OpenAI%20%7C%20Anthropic%20%7C%20Gemini-1d4ed8?style=flat-square" alt="协议入口：OpenAI、Anthropic、Gemini"></a>
+</p>
+
+<p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</p>
+
+<p align="center">
+  <a href="#快速部署">快速部署</a> · <a href="repo-docs/README.md">项目文档</a> · <a href="CONTRIBUTING.md">贡献指南</a>
+</p>
 
 模桥 ModelBridge 是部署在 Cloudflare Workers 上的多模型、多协议 API 网关。配置上游账号和模型别名后，客户端可以通过 OpenAI、Anthropic 或 Gemini 接口调用受支持的模型，并在蓝色管理面板管理账号、调用密钥和 Cloudflare 用量。
 
