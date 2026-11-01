@@ -176,19 +176,29 @@ def scan_blob(path: str, oid: str, exceptions: dict, seen: set[tuple[str, str]],
     return errors
 
 
+def revoked_exception_paths(previous: dict, current: dict) -> set[str]:
+    # 修改说明不会改变例外效力；移除路径或更改内容哈希则必须重查现存文件。
+    return {path for path, entry in previous.items()
+            if current.get(path, {}).get('sha256') != entry['sha256']}
+
+
 def staged(exceptions: dict) -> list[str]:
-    names = git('diff', '--cached', '--name-only', '--diff-filter=ACMRT', '-z').split(b'\0')
+    names = {os.fsdecode(raw) for raw in git('diff', '--cached', '--name-only', '--diff-filter=ACMRT', '-z').split(b'\0') if raw}
+    head = git('rev-parse', '--verify', 'HEAD', check=False).strip()
+    if head:
+        names.update(revoked_exception_paths(allowlist(repo_root(), head.decode('ascii')), exceptions))
     errors, seen = [], set()
-    for raw in filter(None, names):
-        path = os.fsdecode(raw)
-        entries = git('ls-files', '--stage', '-z', '--', path).split(b'\0')
-        for entry in filter(None, entries):
-            info, _ = entry.split(b'\t', 1)
-            mode, oid, stage = info.split()
-            if stage != b'0':
-                errors.append(path + ': 请先解决暂存区冲突')
-            elif mode not in (b'120000', b'160000'):
-                errors.extend(scan_blob(path, oid.decode('ascii'), exceptions, seen))
+    # 读取真实 index 路径后精确匹配，例外路径中的通配符或换行不是 Git 查询语法。
+    for entry in filter(None, git('ls-files', '--stage', '-z').split(b'\0')):
+        info, raw_path = entry.split(b'\t', 1)
+        path = os.fsdecode(raw_path)
+        if path not in names:
+            continue
+        mode, oid, stage = info.split()
+        if stage != b'0':
+            errors.append(path + ': 请先解决暂存区冲突')
+        elif mode not in (b'120000', b'160000'):
+            errors.extend(scan_blob(path, oid.decode('ascii'), exceptions, seen))
     return errors
 
 
@@ -229,12 +239,27 @@ def pushed(lines: bytes, exceptions: dict) -> list[str]:
             args = ['diff-tree', '--root', '--no-commit-id', '-r', '--raw', '--no-renames', '--diff-filter=ACMRT', '-z']
             args += [parents[0], commit] if parents else [commit]
             entries = git(*args).split(b'\0')
+            candidates = {}
             for index in range(0, len(entries) - 1, 2):
                 fields = entries[index].split()
                 if len(fields) != 5 or not fields[0].startswith(b':'):
                     raise ValueError('Git 文件差异返回无效结果')
                 _, mode, _, oid, _ = fields
                 path = os.fsdecode(entries[index + 1])
+                candidates[path] = (mode, oid)
+            revoked = set()
+            for parent in parents:
+                revoked.update(revoked_exception_paths(allowlist(root, parent, reader), commit_exceptions))
+            if revoked:
+                # 合并提交可能相对第一父项没有文件变化，却撤销另一父项的例外。
+                # 仅枚举文件树元数据，不把未改动的大文件内容读入内存。
+                for entry in filter(None, git('ls-tree', '-r', '-z', commit).split(b'\0')):
+                    info, raw_path = entry.split(b'\t', 1)
+                    path = os.fsdecode(raw_path)
+                    if path in revoked:
+                        mode, _, oid = info.split()
+                        candidates[path] = (mode, oid)
+            for path, (mode, oid) in candidates.items():
                 if mode in (b'120000', b'160000'):
                     continue
                 # 缓存包含本提交对该路径的精确例外，撤销例外后必须重新检查。

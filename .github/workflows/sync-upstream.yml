@@ -57,7 +57,9 @@ jobs:
       # Candidate code only runs in this read-only job, without repository secrets.
       - name: Test candidate
         if: steps.merge.outputs.changed == 'true'
-        run: node --test tests/*.test.mjs
+        run: |
+          python3 -c "import sys; assert sys.version_info >= (3, 10)"
+          node --test tests/*.test.mjs
 
   propose:
     needs: validate
