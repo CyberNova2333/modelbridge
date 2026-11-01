@@ -1,54 +1,73 @@
-# 模桥 · ModelBridge：一次真实主流程
+# 一次聊天请求怎样得到结果
 
-客户端希望用同一种聊天协议访问不同供应商，网关却必须把调用权限、模型选择和上游凭据分开处理。本指南跟随一次聊天请求，解释它怎样选中账号并返回普通或流式结果。
+客户端用一个模型别名发起聊天。模桥先检查调用权，再把别名变成上游目标，选择凭据，最后把结果返回客户端协议。难点是这些选择不能互相替代：模型出现在列表中，不代表账号有权限；账号能响应，也不代表它能执行客户端要求的全部约束。
 
-下面的 case 是依据源码分支整理的代表性输入与结果，不是本轮线上观测。
+下面使用一个中性示例。它按当前路由分支组织，不是线上请求记录。假设管理员已创建启用的 OpenAI 兼容账号，账号允许 `example-chat`，并保存映射 `my-chat → openai:example-chat`。客户端持有单独生成的实例调用密钥。
 
-| 输入或状态 | 动作与结果 |
+```http
+POST /v1/chat/completions
+Authorization: Bearer <INSTANCE_API_KEY>
+Content-Type: application/json
+
+{"model":"my-chat","messages":[{"role":"user","content":"你好"}],"stream":false}
+```
+
+## Step 1: 先确认实例与调用权限
+
+Worker 检查 KV、管理员 Secret 和配置 DO 绑定，再把 `/v1/` 请求送入协议入口。实例调用密钥与权威配置中的密钥匹配才继续；没有密钥或密钥已撤销时返回 401，不发起生成。管理员密码与供应商 Token 不充当这把密钥。
+
+权限通过后，配置读取在本请求内复用；不同请求不共享鉴权快照。DO 保存账号、密钥和映射，旧 KV 配置只在首次初始化时迁移，避免稍后用旧快照复活撤销的密钥。详细状态与并发边界见[访问权限与配置生命周期](../modules/access-and-config.md)。
+
+实现入口：[Worker](../../_worker.js) 的 `handleRequest`、`handleV1Proxy`、`checkProxyAuth` 和 `getAppConfig`。
+
+## Step 2: 把输入与别名变成目标
+
+入口按实际字节读取 JSON；本例聊天请求上限 16 MiB，超过限额返回 413，无效 JSON 返回 400。合法请求需要非空模型名与消息数组。解析器把 `my-chat` 解析成 `openai:example-chat`，从而确定供应商和上游模型名。
+
+模型列表用于发现名称，并非授权证据。没有映射、显式目标或已声明模型可解析时，返回 400 `model_not_found`。不同名称形式与冲突处理见[模型路由与协议契约](../modules/routing-and-protocols.md)。
+
+实现入口：[Worker](../../_worker.js) 的 `readRequestJson`、`handleCompletions`、`resolveModelName`。
+
+## Step 3: 从允许的账号中选择凭据
+
+网关只选择启用、供应商匹配、允许 `example-chat` 的账号；若指定了 `upstream:<账号ID>:<模型>`，还必须匹配该账号 ID。没有候选时直接报错，不临时借用 Cloudflare 或其他供应商的凭据。
+
+本例把 `model` 改为 `example-chat`，向账号配置的 OpenAI 兼容地址发送请求，认证头使用该账号凭据。客户端调用密钥留在网关鉴权边界。若请求含目标上游无法保证的格式、工具或思考约束，会在生成前拒绝；不会悄悄删掉约束后继续。
+
+实现入口：[Worker](../../_worker.js) 的 `parseUpstreamTarget`、`getMatchingUpstreamAccounts`、`callOpenAICompatibleAPI`。
+
+## Step 4: 根据失败的确定性决定是否换账号
+
+成功时不再选择其他账号。只有明确的 401、403、404、429 拒绝允许在总计最多三个候选账号内换账号；网络异常、超时、5xx 或无法使用的成功响应不会重新生成，因为前一次可能已经计费。
+
+读取上游响应受大小与闲置超时限制，取消会向连接传播。超时不是总耗时预算，本地断开也不能证明供应商停止了计算或计费。[上游请求与配额边界](../modules/upstream-and-quota.md)解释这些取舍以及连接测试和统计查询的开销。
+
+实现入口：[Worker](../../_worker.js) 的 `fetchUpstream`、`shouldRetryUpstream`；验证用例为[上游安全回归](../../tests/upstream-safety.test.mjs)。
+
+## Step 5: 保留语义并返回结果
+
+普通响应将模型名恢复为客户端使用的 `my-chat`。若本例使用 `stream: true`，则逐段返回 SSE，处理元信息、终止与错误，并将客户端取消传给上游读取器。
+
+错误信息与流元信息要脱敏；模型正文、工具参数和签名思考不能因脱敏而被任意改写。无法表示的异常终止应作为错误返回，不能伪造正常结束。具体跨协议案例见协议页，例如 Gemini 异常工具结束与 Anthropic 拒绝语义。
+
+实现入口：[Worker](../../_worker.js) 的 `passthroughStream`、`sanitizeUpstreamErrorStream` 和协议转换器。
+
+## 检查正常与边界分支
+
+| 改变哪个条件 | 预期结果 |
 | --- | --- |
-| 调用密钥错误 | 401，不进入聊天生成 |
-| 模型未配置且不能解析 | 400 model_not_found |
-| 匹配账号明确返回限流 | 最多三账号内尝试下一候选 |
-| 连接结果不确定或成功响应无效 | 返回错误，不发起另一轮生成 |
-
-## Step 1: 先确认绑定和客户端调用权限
-
-Worker 为每次请求创建独立上下文，检查配置存储与管理员 Secret 等运行前提，再把 /v1 路径交给协议入口。聊天调用用网关生成的密钥鉴权，管理员登录凭据和上游账号凭据各有用途，不能互相替代。错误调用密钥在转发前得到 401。
-
-[对应实现](../../_worker.js)，定位 `fetch、handleRequest、handleV1Proxy、checkProxyAuth`。
-
-## Step 2: 校验聊天输入并解析模型
-
-聊天请求必须有非空模型和消息数组。解析器先接受显式上游前缀，再查看映射及账号声明的模型；无法识别时返回 model_not_found。模型目录与映射只说明配置接受哪些名称，不证明某个账号真的有上游权限。
-
-[对应实现](../../_worker.js)，定位 `handleCompletions、resolveModelName`。
-
-## Step 3: 只把请求送给匹配的上游
-
-解析出的目标决定供应商或具体账号。网关从启用账号中筛选匹配项，再按供应商构造认证头和协议形状，客户端密钥不会作为上游密钥使用。通用上游与 Cloudflare 账号分开匹配，避免同名模型走错凭据。
-
-[对应实现](../../_worker.js)，定位 `callOpenAICompatibleAPI、parseUpstreamTarget、getMatchingUpstreamAccounts`。
-
-## Step 4: 按明确失败决定是否换账号
-
-最多尝试三个匹配账号；只有明确的鉴权、模型或限流拒绝允许切换。网络结果不确定、无效成功响应或服务端错误不会重新生成，避免一次用户请求造成重复消耗。无匹配账号返回服务不可用，不猜测一个默认账号。
-
-[对应实现](../../_worker.js)，定位 `shouldRetryUpstream、fetchUpstream；tests/upstream-safety.test.mjs`。
-
-## Step 5: 把结果与错误转换为客户端协议
-
-普通响应重写回客户端使用的模型名；流式响应逐段转换并检查终止和错误。上游凭据在错误和流元信息中脱敏。取消可传给上游连接，但实际停止计算或计费取决于供应商，不能由本地取消推断。
-
-[对应实现](../../_worker.js)，定位 `passthroughStream、sanitizeUpstreamErrorStream、handleCompletions`。
-
-## 检查这条解释
+| 本例映射、密钥、账号和响应均合法 | 返回客户端协议，模型名保持 `my-chat` |
+| 调用密钥失效 | 401，生成调用为零 |
+| 请求体超过实际字节预算 | 413，停止读取，不进入生成 |
+| 白名单排除目标模型 | 无可用账号，不借用其他供应商凭据 |
+| 上游明确限流且有其他候选 | 有界切换，最多三个候选 |
+| 上游响应在网络中丢失 | 返回错误，不重新生成 |
+| 请求含不能表达的协议约束 | 在生成前拒绝，不静默降级 |
 
 ```sh
 node --test tests/*.test.mjs
 ```
 
-测试使用模拟上游；当前可读用例覆盖错误包、账号隔离、重试预算和协议转换，但本轮未运行这些业务测试。真实账号权限、云端持久化和生产流取消仍需独立验证。
-
-理解这条交接后，用[代码地图定位下一次修改](../code-map.md)；需要反查依据时查看[源码调查与边界证据](../references/source-evidence.md)。
+这些断言可在模拟上游中检查交接与拒绝分支，实际执行记录见[同步记录](../change-log.md)。真实账号权限、云端持久化、模型质量和计费不由本例证明。理解流程后，用[代码地图找到下一次修改和对应测试](../code-map.md)。
 
 证据状态：除特别标注外，本页基于当前源码已确认。

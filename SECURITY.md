@@ -1,5 +1,11 @@
 # 安全说明 / Security
 
+## 网关问题报告 / Gateway vulnerability reports
+
+先核对 [凭据与配置边界](repo-docs/modules/access-and-config.md) 和 [上游与配额边界](repo-docs/modules/upstream-and-quota.md)。私下报告时提供受影响的路由与客户端协议、上游类型、普通或流式响应、触发条件、预期和实际行为，以及可公开的最小复现。用占位值替换管理员密码、调用密钥、上游 Token、OAuth 凭据和私有配置；不要直接附上管理配置导出或完整请求日志。
+
+Review the credential, configuration, upstream and quota boundaries in the linked guide pages. In a private report, include the affected route and client protocol, upstream type, JSON or streaming response, trigger, expected and actual behavior, and a minimal public-safe reproduction. Replace administrator passwords, client keys, upstream tokens, OAuth credentials and private configuration with placeholders. Do not attach raw configuration exports or complete request logs.
+
 <!-- repo-maintenance:begin -->
 ## 本地提交与推送检查 / Local commit and push checks
 
@@ -11,9 +17,9 @@ The hooks run offline. They scan staged objects, commit messages and the commits
 
 Coverage includes private-key headers, common token formats and sensitive paths. Keep real local configuration, private keys and local-only design manuscripts out of version control. Diagnostics show rule identifiers and locations, never the matched value. Blobs larger than 8 MiB receive path checks and an explicit content-scan notice; retain existing LFS and asset checks. These checks do not detect every secret and do not replace review, dependency audits or existing protections.
 
-确认为可公开测试夹具的内容，可以在 `.repo-security-allowlist.json` 登记仓库相对路径、文件完整内容的 `sha256` 和解释用途的 `reason`。不支持通配符；内容变化后必须重新审阅。例外须和文件一起暂存；推送时按每条提交里的例外清单检查，未暂存的工作区清单不能放宽规则。
+确认为可公开测试夹具的内容，可以在 `.repo-security-allowlist.json` 登记仓库相对路径、文件完整内容的 `sha256` 和解释用途的 `reason`。不支持通配符；内容变化后必须重新审阅。例外须和文件一起暂存；推送时按每条提交里的例外清单检查，未暂存的工作区清单不能放宽规则。撤销例外或变更其哈希时，即使文件内容不变也会重新检查。历史扫描使用批量 Git 对象读取和有界缓存；缓存按路径、对象和该提交的精确例外隔离，每条新增提交及其中间版本仍在范围内。
 
-Public test fixtures may be reviewed using an exact-path, exact-content SHA-256 entry with a reason in `.repo-security-allowlist.json`. Wildcards are unsupported. Stage the exception with the fixture. The check reads exceptions from the index or the relevant pushed commit, never from unstaged working files.
+Public test fixtures may be reviewed using an exact-path, exact-content SHA-256 entry with a reason in `.repo-security-allowlist.json`. Wildcards are unsupported. Stage the exception with the fixture. The check reads exceptions from the index or the relevant pushed commit, never from unstaged working files. Revoking an exception or changing its hash rechecks even unchanged file content. History scanning uses batched Git objects and a bounded cache keyed by path, object and the commit's exact exception; every introduced commit and intermediate version remains in scope.
 
 ```json
 {
@@ -28,5 +34,3 @@ Public test fixtures may be reviewed using an exact-path, exact-content SHA-256 
 
 Revoke or rotate exposed credentials first, then assess history, artifacts and logs. Removing the latest file does not remove older commits. Use an existing private reporting channel; establish a private contact if none is documented, and keep credentials and private data out of public issues.
 <!-- repo-maintenance:end -->
-
-历史扫描使用批量 Git 对象读取；每条新增提交及其中间版本仍在检查范围内。缓存按路径、对象和该提交的精确例外隔离，后续提交撤销例外会重新检查；内存缓存有界，大对象保留原有扫描提示与限制。

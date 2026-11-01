@@ -4,236 +4,237 @@
 
 ![模桥 ModelBridge](assets/modelbridge-logo.svg)
 
-模桥 ModelBridge 是一个多模型、多协议 API 网关，汇集 Cloudflare Workers AI、OpenAI、Anthropic 和 Gemini 上游，为客户端提供统一接入和可视化管理面板。推荐部署在 Cloudflare Workers；Pages 部署需要额外绑定由 Worker 托管的 Durable Object。
+模桥 ModelBridge 是部署在 Cloudflare Workers 上的多模型、多协议 API 网关。配置上游账号和模型别名后，客户端可以通过 OpenAI、Anthropic 或 Gemini 接口调用受支持的模型，并在蓝色管理面板管理账号、调用密钥和 Cloudflare 用量。
 
-基于 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 开发，当前实例入口为 [aigateway.cbnv.top](https://aigateway.cbnv.top)。
+项目基于 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 开发，支持 Cloudflare Workers AI、OpenAI 兼容服务、Anthropic、Gemini，以及实验性的 Antigravity（Google Cloud Code）接入。Pages 部署需要额外绑定由 Worker 托管的 Durable Object。
 
-品牌素材：[横版 Logo](assets/modelbridge-logo.svg) · [独立图标](assets/modelbridge-icon.svg)。以下界面截图使用本地演示数据。
+品牌素材：[横版 Logo](assets/modelbridge-logo.svg) · [独立图标](assets/modelbridge-icon.svg)。网页显示名由 `PROJECT_DISPLAY_NAME` 设置，与 Wrangler 的 Worker 服务名独立。
 
-#### 主页预览
+### 界面预览
+
+以下截图使用本地演示数据。
+
 ![公开首页](img/1.png)
 
-#### 管理页面
 ![管理页面](img/2.png)
 
-## 🚀 它能干什么
+## 阅读路径
 
-- OpenAI 兼容：把 CF 免费 AI 模型转成 `/v1/chat/completions` 格式，Cursor、LobeChat、NextChat 等客户端直接接入
-- Antigravity 实验兼容：支持邮箱与 Refresh Token 登录、自动查询项目，以及思考内容和多轮工具调用转换；具体模型权限取决于账号
-- 多模态支持：除对话外还支持 `/v1/embeddings` 和 Anthropic `/v1/messages`
-- 负载均衡：支持绑定多个 CF 与 Antigravity 账号，请求自动轮询与限流故障转移
-- 管理面板：可视化查看用量、管理账号/密钥、自定义模型映射
-- 默认鉴权：所有模型调用都需要实例 API Key；未配置或删除最后一个密钥后，调用入口保持关闭
+| 读者目标 | 从这里开始 | 读完后获得什么 |
+| --- | --- | --- |
+| 部署并开始调用 | [快速部署](#快速部署) → [首次使用](#首次使用) | 存储绑定、账号配置与调用示例 |
+| 理解一次请求 | [项目指南](repo-docs/README.md) → [主流程](repo-docs/walkthroughs/one-real-run.md) | 从鉴权、选路到返回结果的行为模型 |
+| 查兼容范围和运行边界 | [模型路由与协议](repo-docs/modules/routing-and-protocols.md)、[上游与配额](repo-docs/modules/upstream-and-quota.md) | 哪些能力可转换、何时拒绝或停止重试 |
+| 修改代码或提交贡献 | [代码地图](repo-docs/code-map.md)、[贡献指南](CONTRIBUTING.md) | 修改入口、验证方式与提交约定 |
+| 核对解释依据 | [源码证据](repo-docs/references/source-evidence.md) | 已确认事实、验证边界与未覆盖区域 |
 
-## ⚡ 快速部署
+## 功能与边界
 
-### 🔧 Workers 部署（推荐）
+- 提供 OpenAI Chat Completions、旧版 Completions、Embeddings、Anthropic Messages，以及 Gemini 内容生成、向量和模型目录端点。
+- 支持多账号、模型别名、账号模型声明和最多三个候选账号的有限故障切换。
+- 转换受支持的 JSON 与流式响应，保留工具调用、拒绝、截断和签名思考的语义；无法表达的约束会明确报错。
+- 管理员登录、客户端调用密钥和上游凭据分离。未创建调用密钥或删除最后一个密钥后，模型调用入口保持关闭。
+- 配置以 SQLite Durable Object 为准，保留并发更新与密钥撤销；Cloudflare 用量通过缓存展示。
 
-需要两个存储绑定：`KV` 保存旧配置快照，`CONFIG_STORE`（`AppConfigStore` 类）保存账号、API 密钥、模型映射、管理员会话及用量缓存。`ADMIN_PASSWORD` 必设，否则服务拒绝访问。
+模型目录包含多种任务，并不意味着所有模型都能通过聊天接口调用。本项目没有实现完整的图片、音频或其他媒体生成 API，也不提供跨供应商精确 token 计数。真实模型权限取决于上游账号，模拟测试不等于生产验收。
 
-```bash
-npm install -g wrangler
-wrangler login
-wrangler kv namespace create KV
+## 快速部署
+
+从公开仓库获取源码：
+
+```sh
+git clone https://cnb.cool/CyberNova2333/modelbridge.git
+cd modelbridge
 ```
 
-本仓库的 `wrangler.toml` 目前记录了本次线上部署的配置，Worker 服务名称为 `aigateway`，主入口为 `aigateway.cbnv.top`。网页项目显示名由 `_worker.js` 中的静态 `PROJECT_DISPLAY_NAME` 常量独立设置，不会自动读取 Worker 服务名。其他用户部署前，请将 `account_id` 和 `kv_namespaces` 中的 `id` 改为自己的账号与 KV 命名空间，并修改或移除本实例的自定义域名配置。
+### Workers（推荐）
 
-把创建命令返回的命名空间 ID 填入 `wrangler.toml`；升级已有部署时，填写原有 KV 的 ID：
+先安装 Node.js 24+，使用 Wrangler 登录自己的 Cloudflare 账号并创建 KV：
+
+```sh
+npx wrangler login
+npx wrangler kv namespace create KV
+```
+
+仓库的 `wrangler.toml` 保留维护者实例的部署配置。新建实例前修改以下项目，已有实例升级时保留原有存储绑定：
+
+| 配置 | 操作 |
+| --- | --- |
+| `name` | 改为自己的 Worker 名称；它不会修改网页品牌 |
+| `account_id` | 改为自己的 Cloudflare Account ID |
+| `routes` | 改为自己的自定义域名，或移除该配置使用 Workers 域名 |
+| `kv_namespaces` 的 `id` | 填入创建命令返回的 ID；升级时使用原 KV |
+| `CONFIG_STORE` / `AppConfigStore` | 保留 Durable Object 绑定及 `new_sqlite_classes` 迁移 |
+
+KV 绑定格式：
 
 ```toml
 [[kv_namespaces]]
 binding = "KV"
-id = "你的KV命名空间ID"
+id = "YOUR_KV_NAMESPACE_ID"
 ```
 
-保留 `wrangler.toml` 中的 `CONFIG_STORE` / `AppConfigStore` 绑定和 `new_sqlite_classes` 迁移配置，然后部署并设置管理员密码：
+保留 `compatibility_flags` 中的 `global_fetch_strictly_public`、`enable_request_signal`，以及 `observability.redact_query_string = true`。前两个[兼容性开关](https://developers.cloudflare.com/workers/configuration/compatibility-flags/)分别让全局 fetch 按公共互联网路径路由（避免直达自身区域源站的捷径）、启用入站请求取消信号；后一个[日志设置](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/)从日志和追踪请求 URL 中移除查询字符串。公共路由开关不等于完整的私网访问防火墙。
 
-```bash
-wrangler deploy
-wrangler secret put ADMIN_PASSWORD
+```sh
+npx wrangler deploy
+npx wrangler secret put ADMIN_PASSWORD
 ```
 
-保留 `compatibility_flags` 中的 `global_fetch_strictly_public` 和 `enable_request_signal`。前者限制外部请求访问私有网络，后者使客户端断开能够触发网关的上游取消逻辑。
+`ADMIN_PASSWORD` 是必需的管理员 Secret；缺少它时所有访问被拦截。已有实例升级无需重复设置。不要把密码或上游凭据写入 `wrangler.toml`。
 
-Wrangler 会在部署时应用 SQLite Durable Object 迁移。首次访问配置时，`AppConfigStore` 自动导入原 KV 的 `config` 一次；后续配置读写以 Durable Object 为准，原 KV 的 `config` 保留为旧快照，不再作为当前配置读取。用量缓存与会话存放在 Durable Object 的独立键中。已有部署的 `ADMIN_PASSWORD` 无需重复设置。
+Wrangler 部署时应用 SQLite Durable Object 迁移。首次读取配置时，`AppConfigStore` 将原 KV 的 `config` 导入一次；后续账号、密钥、映射以 Durable Object 为准，会话及用量缓存也存放其中。KV 的旧快照不会继续同步。回滚必须保留当前 Durable Object，不能直接用只读旧 KV 的版本覆盖当前状态。详见[访问与配置](repo-docs/modules/access-and-config.md)。
 
-旧 KV 的 `config` 是迁移时的快照，不会同步之后的修改。回滚时应继续使用 `CONFIG_STORE`；直接换回尚未支持 Durable Object 的旧源码，会重新读取过时配置。如需回到旧存储方式，应先通过受控的配置同步和迁移流程保存最新配置。
+### Pages
 
-### 📦 Pages 部署
+按 [Pages 绑定要求](https://developers.cloudflare.com/pages/functions/bindings/)，Pages 不能独立托管 Durable Object，单独上传 `_worker.js` 不足以运行：
 
-Pages 不能直接托管 Durable Object，单独拖入 `_worker.js` 还不足以完成部署：
-
-1. 先按上面的 Workers 步骤部署导出 `AppConfigStore` 的 Worker，并为它绑定原有 `KV`。
-2. 在 Pages 项目中上传 `_worker.js`，绑定同一个 `KV`，设置必需的 `ADMIN_PASSWORD`。
-3. 为 Pages 添加名为 `CONFIG_STORE` 的 Durable Object 绑定，选择该 Worker 的 `AppConfigStore` 类。使用 Pages 的 Wrangler 配置时，绑定需包含托管 Worker 的 `script_name`：
+1. 按上面的 Workers 步骤部署导出 `AppConfigStore` 的 Worker，绑定原有 `KV`。
+2. 为 Pages 上传 `_worker.js`，绑定同一个 `KV`，设置 `ADMIN_PASSWORD`。
+3. 添加名为 `CONFIG_STORE` 的 Durable Object 绑定，选择托管 Worker 的 `AppConfigStore`。使用 Pages 的 Wrangler 配置时指定 `script_name`：
 
 ```toml
 [[durable_objects.bindings]]
 name = "CONFIG_STORE"
 class_name = "AppConfigStore"
-script_name = "aigateway" # 改为实际托管 Durable Object 的 Worker 名称
+script_name = "YOUR_CONFIG_WORKER_NAME"
 ```
 
-4. 在 Pages 的兼容性设置中启用 `global_fetch_strictly_public` 和 `enable_request_signal`，然后重新部署 Pages。Durable Object 类的迁移由托管它的 Worker 管理。
+4. 在 Pages 兼容性配置中启用 `global_fetch_strictly_public` 和 `enable_request_signal`；客户端优先用请求头传密钥，单独核对 Pages 日志是否保留查询参数，再重新部署。
 
-Pages 和托管 Worker 都必须使用当前版本代码；升级时先更新托管 Worker，再更新 Pages。每个入口使用自己的 `ADMIN_PASSWORD` 验证登录，会话按入口 origin 隔离。轮换 Pages 的密码会使该入口旧会话失效，不会改动托管 Worker 的密码。此次会话格式升级会使原有登录状态失效，需要重新登录。
+Pages 与托管 Worker 应使用相同版本代码，升级时先更新 Worker，再更新 Pages；迁移由托管 Worker 管理。两者共享配置，但各入口使用自己的管理员 Secret，会话按入口 origin 隔离。
 
-## 📋 使用步骤
+## 首次使用
 
-1. 打开部署地址，输入管理员密码登录
-2. 在「账号管理」添加 CF 账号（Account ID + API Token）。Token 在 [Cloudflare Dashboard](https://dash.cloudflare.com/) → My Profile → API Tokens → Workers AI 模板生成
-3. 在「API 密钥」生成调用密钥（`sk-wa-xxx`）
-4. 客户端配置 Base URL 为 `https://你的部署域名/v1`，填入密钥即可
+1. 打开部署地址，用 `ADMIN_PASSWORD` 登录。
+2. 在「账号管理」添加上游账号，填写凭据和支持的模型 ID；Cloudflare 使用 Account ID 与 API Token。
+3. 在「API 密钥」生成实例调用密钥。
+4. 选择实例已配置且上游有权限的模型。OpenAI 客户端 Base URL 为 `https://YOUR_GATEWAY_DOMAIN/v1`，填入实例调用密钥。
 
-用量刷新需要管理员登录；公开首页只读取已缓存的汇总数据，不触发查询或写入。缓存有效期为 5 分钟，同期刷新请求会合并；相同 Cloudflare Account ID 的不同凭据共享统计与额度。每批最多查询 20 个不同账号，同时最多进行 4 个查询。同组凭据遇到明确的鉴权或统计权限拒绝时，最多尝试 3 条不同凭据；网络错误、限流和服务端故障不会触发遍历重试。
+以下为 Bash/curl 示例。用自己的域名、实例密钥与模型别名替换占位值：
 
-模型请求只在当前请求内复用一次配置快照，减少 Durable Object 调用；不同请求不共享鉴权缓存。缺少调用凭据会直接拒绝，撤销密钥会在下一次请求生效。
+```sh
+curl 'https://YOUR_GATEWAY_DOMAIN/v1/chat/completions' \
+  -H 'Authorization: Bearer YOUR_GATEWAY_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"你好"}]}'
+```
 
-管理员登录使用随机会话，24 小时后到期；退出登录或修改密码会使相应会话失效。升级后旧登录状态会失效，需要重新登录。密码摘要不能作为管理接口密钥使用。每个来源 IP 在 15 分钟内最多尝试登录 10 次；管理页不加载外部脚本或字体。
+管理员会话为随机令牌，24 小时后到期；退出登录或轮换密码会使相应会话失效。每个来源 IP 在 15 分钟窗口内最多允许 10 次失败登录。调用密钥撤销在下一次请求生效，配置快照只在单次请求内复用。详细信任边界见[访问与配置](repo-docs/modules/access-and-config.md)；报告问题前阅读[安全说明](SECURITY.md)。
 
-## 通用上游接口
-
-在后台「账号管理」添加上游时，可选择 Cloudflare、OpenAI、Anthropic、Gemini 或 Antigravity。OpenAI 兼容服务也可填写第三方 Base URL；地址必须使用 HTTPS，不得包含用户名、密码、查询参数或片段。本地开发允许 `http://localhost` 或 `http://127.0.0.1`。
+## 配置上游与模型映射
 
 | 上游类型 | 默认 Base URL | 凭据 |
 | --- | --- | --- |
+| Cloudflare | 固定 Workers AI 地址 | Account ID、API Token |
 | OpenAI | `https://api.openai.com/v1` | API Key |
 | Anthropic | `https://api.anthropic.com/v1` | API Key |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta` | Gemini API Key |
-| Cloudflare | 固定 Workers AI 地址 | Account ID 和 API Token |
-| Antigravity | 内置 Cloud Code 地址 | Refresh Token 或 Access Token |
+| Gemini | `https://generativelanguage.googleapis.com/v1beta` | API Key |
+| Antigravity | 内置 Cloud Code 地址 | 邮箱、Refresh Token；兼容 Access Token |
 
-「上游模型 ID」可每行填写一个，也可用逗号分隔。声明的模型可直接作为客户端模型名；需要别名时，在模型映射中将目标写为 `openai:模型ID`、`anthropic:模型ID` 或 `gemini:模型ID`。同一供应商的多个启用账号可用于故障切换；停用账号不参与请求。若多个账号使用不同模型，应分别填写各自支持的模型 ID。
+通用上游可填写自己的兼容服务 Base URL，必须为不含用户名、密码、查询参数和片段的公共 HTTPS 地址；本地开发允许 HTTP loopback 地址。编辑同一类型时凭据留空保留原值，切换类型必须重新填写凭据，旧目标地址、身份与 OAuth 项目不会沿用。账号列表不会返回真实上游密钥。
 
-编辑账号时，凭据留空即保留原值；账号列表不会返回真实上游密钥。「测试连接」对通用上游只读取模型目录，不发送生成请求，也不代表已验证所有模型的调用权限。Antigravity 测试会刷新登录并查询项目，不发送生成请求。Cloudflare 的测试包含一次小型向量生成，会消耗少量额度。
+「上游模型 ID」支持每行一个或逗号分隔；非空列表限制该账号可接收的模型，留空表示不限制。通用上游已声明的模型可直接使用；推荐为有歧义的名称设置显式映射：
 
-Cloudflare 用量图表和每日 Neurons 额度只统计启用的 Cloudflare 账号。其他供应商的用量应在相应控制台查看，不能计入 Cloudflare 免费额度。
+```json
+{
+  "my-chat": "openai:YOUR_MODEL_ID",
+  "my-claude": "anthropic:YOUR_MODEL_ID",
+  "my-gemini": "gemini:YOUR_MODEL_ID",
+  "my-oauth": "antigravity:YOUR_MODEL_ID",
+  "my-vector": "@cf/baai/bge-m3"
+}
+```
 
-## 🔑 模型映射
+Cloudflare 或通用上游需要固定账号时可用 `upstream:账号ID:模型ID`；Antigravity 使用自己的前缀选路。同一供应商中只有启用且匹配模型声明的账号参与选路。直接使用 `@cf/...` 或显式供应商前缀会绕过别名查找，因此映射表不是完整的访问或预算白名单。Cloudflare 模型路径中的路径穿越、查询参数与片段会被拒绝。详见[模型路由与协议](repo-docs/modules/routing-and-protocols.md)。
 
-预设包含当前官方目录中可使用每日免费额度的 65 个模型，完整列表见 [cloudflare-model-map.json](cloudflare-model-map.json)；已排除要求付费计费方式的模型。“恢复预设映射”只会恢复这些免费额度模型。以下为部分示例：
+仓库预设 [Cloudflare 映射](cloudflare-model-map.json) 共 65 条，按可用每日免费额度的模型维护；「恢复预设映射」恢复这份列表。预设含聊天、向量和其他任务，选用时仍需匹配端点能力。面板按每个 Cloudflare Account ID 每日 10,000 Neurons 估算免费额度，相同账号的不同 Token 不增加额度。实际价格、可用模型和超额费用以 [Cloudflare 计费说明](https://developers.cloudflare.com/workers-ai/platform/pricing/) 为准；映射与统计缓存都不是服务端强制预算。
 
-| 请求名 | CF 实际模型 |
-|--------|------------|
-| `glm-4.7-flash` | `@cf/zai-org/glm-4.7-flash` |
-| `gemma-4-26b-a4b-it` | `@cf/google/gemma-4-26b-a4b-it` |
-| `nemotron-3-120b-a12b` | `@cf/nvidia/nemotron-3-120b-a12b` |
-| `gpt-oss-20b` | `@cf/openai/gpt-oss-20b` |
-| `gpt-oss-120b` | `@cf/openai/gpt-oss-120b` |
-| `bge-m3` | `@cf/baai/bge-m3` |
+## Antigravity 实验接入
 
-免费指 [Cloudflare 每账号每日赠送的 10,000 Neurons 额度](https://developers.cloudflare.com/workers-ai/platform/pricing/)，并非无限免费；付费套餐超出该额度仍会计费。模型映射和用量面板不是服务端强制预算，统计也存在延迟。
+后台选择 Antigravity 后，手动粘贴邮箱和 `refresh_token`，无需导入 JSON。保存启用账号时会验证登录并查询项目，成功后才保存。高级设置可指定已授权项目及签发令牌的 OAuth 客户端；通常留空使用内置客户端。修改自动发现项目所绑定的邮箱、令牌或 OAuth 配置后会重新发现，手动指定项目会保留。
 
-直接传 `@cf/供应商/模型` 格式的模型名会跳过映射；网关会拒绝路径穿越、查询参数和片段。
+也可使用环境 Secret：
 
-## 🌌 Antigravity (Google Cloud Code) 配置与使用
+```sh
+npx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
+```
 
-这是面向 Google Cloud Code 内部接口的实验兼容实现。已为别名解析、令牌刷新、项目发现、流式响应及带签名的工具历史添加模拟回归测试；真实账号的可用模型和权限仍需实际调用确认，内部协议变化可能影响兼容性。
+可选 `ANTIGRAVITY_PROJECT_ID`、`ANTIGRAVITY_EMAIL`；`OAUTH_CLIENT_ID` 与 `OAUTH_CLIENT_SECRET` 必须成对配置，账号级设置优先。多账号环境配置使用 `ANTIGRAVITY_ACCOUNTS` JSON 数组，字段示例见[上游与配额](repo-docs/modules/upstream-and-quota.md)。旧的 `ya29.` Access Token 仍兼容，但不能自动续期。
 
-### 1. 配置账号凭据
+内置别名包括 `claude-sonnet-4-5-thinking`、`claude-opus-4-5-thinking`、`claude-sonnet-4-5`、`gemini-3-flash`、`gemini-3-pro-high`、`gemini-3-pro-low`；存在别名不代表账号有权限。支持 `antigravity:` 和 `@antigravity/` 前缀。Claude Code 可将 `ANTHROPIC_BASE_URL` 指向网关根地址，并使用实例调用密钥；其他客户端使用对应协议端点。
 
-在后台「账号管理」选择 Antigravity，手动粘贴邮箱与 `refresh_token` 即可，无需导入 JSON 文件。保存启用账号时会验证登录并自动查询项目，查询成功后才保存。高级设置可以指定已有授权的项目 ID，以及签发令牌所用的 OAuth 客户端；通常留空即可。令牌刷新后自动重试一次 401，停用账号不参与请求。
+这是对 Google Cloud Code 内部接口的实验兼容，协议变化可能影响可用性。令牌刷新后最多重试一次 401；并发刷新只在同一 Worker isolate 内合并。多轮工具调用须保留返回的思考签名。图片仅支持内嵌 base64；远程图片、文档及工具结果非文本媒体不支持。结构化 JSON 输出约束和无法表达的思考配置会在生成前拒绝，网关不会额外插入系统提示或伪造用户消息。
 
-也可通过环境 Secret 配置：
+## 客户端协议
 
-1. **Wrangler Secret（推荐）**：
-   ```bash
-   wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
-   ```
-   输入 Google OAuth 获得的 `refresh_token` 即可。多账号可使用 `ANTIGRAVITY_ACCOUNTS`（JSON 数组格式）。
-2. **高级配置**：
-   `ANTIGRAVITY_PROJECT_ID` 可指定授权项目，`OAUTH_CLIENT_ID` 与 `OAUTH_CLIENT_SECRET` 可覆盖默认 Antigravity installed-app 客户端，两者需同时填写。账号高级设置优先于全局配置。仍兼容 `ya29.` 开头的 Access Token，但该方式不能自动续期。
+| 接口 | 方法与路径 | 调用鉴权 |
+| --- | --- | --- |
+| OpenAI 模型目录 | `GET /v1/models` | `Authorization: Bearer YOUR_GATEWAY_API_KEY` |
+| OpenAI 对话 / 旧版补全 | `POST /v1/chat/completions`、`/v1/completions` | 同上 |
+| OpenAI 向量 | `POST /v1/embeddings` | 同上 |
+| Anthropic 消息 | `POST /v1/messages` | `x-api-key: YOUR_GATEWAY_API_KEY` |
+| Gemini 模型目录 / 单个模型 | `GET /v1beta/models`、`/v1beta/models/{模型}` | `x-goog-api-key: YOUR_GATEWAY_API_KEY` |
+| Gemini 内容 / 流式生成 | `POST /v1beta/models/{模型}:generateContent`、`:streamGenerateContent?alt=sse` | 同上 |
+| Gemini 向量 / 批量向量 | `POST /v1beta/models/{模型}:embedContent`、`:batchEmbedContents` | 同上 |
 
-### 2. 模型使用
+Gemini 也支持 `/v1/models/{模型}:动作` 路径，但 `GET /v1/models` 始终返回 OpenAI 目录格式。不带 `alt=sse` 的 Gemini 流式请求返回 JSON 数组流；`:countTokens` 返回 501。Gemini 兼容 `?key=`，推荐请求头传密钥并保留查询字符串日志脱敏配置。表中均为实例调用密钥，上游凭据只配置在管理后台或环境 Secret。
 
-支持直接使用或通过自定义模型映射映射到以下模型（亦可使用 `antigravity:` 前缀透传）：
-
-- `claude-sonnet-4-5-thinking`：Claude Sonnet 4.5 深度思考模型
-- `claude-opus-4-5-thinking`：Claude Opus 4.5 深度思考模型
-- `claude-sonnet-4-5`：Claude Sonnet 4.5 标准对话模型
-- `gemini-3-flash`：Gemini 3 Flash 思考模型
-- `gemini-3-pro-high`：Gemini 3 Pro 高算力思考模型
-- `gemini-3-pro-low`：Gemini 3 Pro 轻量思考模型
-
-可接入 **Claude Code CLI**（`ANTHROPIC_BASE_URL=https://你的Worker域名`）与 OpenAI、Gemini 客户端。请保留至少一个实例 API Key 才能调用。多轮工具调用需保留返回的思考签名；缺少必要签名或无法表达的工具格式会明确报错。自动发现的项目与凭证身份绑定，修改邮箱、令牌或 OAuth 配置后会重新发现；手动指定的项目会保留。网关不会额外插入系统提示或伪造用户消息。
-
-Antigravity 图片必须使用内嵌 base64；远程图片 URL、文档及工具结果中的非文本媒体会在生成前返回 400。当前适配器无法保证结构化 JSON 输出，因此带 JSON 输出格式约束的请求也会提前拒绝。显式思考预算（包括 `thinkingBudget: 0`）会传给上游；不支持或互相冲突的思考配置会报错。被上游过滤的回答保留拒绝语义，过滤或截断的工具调用不会作为完整工具输出发送。
-
-## 客户端协议与 Gemini 端点
-
-同一实例的上游账号可以被不同协议的客户端调用：
-
-| 客户端 | 地址 |
-| --- | --- |
-| OpenAI Chat Completions | `POST /v1/chat/completions` |
-| OpenAI 旧版 Completions | `POST /v1/completions` |
-| Anthropic Messages | `POST /v1/messages` |
-| Gemini 内容生成 | `POST /v1beta/models/{模型别名}:generateContent` |
-| Gemini 流式生成 | `POST /v1beta/models/{模型别名}:streamGenerateContent?alt=sse` |
-| Gemini 模型目录 | `GET /v1beta/models` |
-| Gemini 单个模型 | `GET /v1beta/models/{模型别名}` |
-| Gemini 向量 | `POST /v1beta/models/{模型别名}:embedContent`、`:batchEmbedContents` |
-
-OpenAI 使用 `Authorization: Bearer <实例密钥>`，Anthropic 使用 `x-api-key`，Gemini 使用 `x-goog-api-key` 或 `?key=`。这些都是网关生成的调用密钥，上游密钥单独保存在账号配置中。Gemini 的 `/v1/models/{模型}:generateContent` 等版本路径也可使用；`GET /v1/models` 保持 OpenAI 列表格式。
-
-推荐通过请求头传递密钥。仓库的 Wrangler 配置启用了 `observability.redact_query_string`，从平台日志和追踪的请求 URL 中移除整个查询字符串；不要依赖平台默认的密钥格式识别。复制部署配置或自行配置日志时，应同时保留这一项。上游 SSE 的注释、事件名和 ID 等元信息也会过滤账号凭证，正常模型文本与签名保持原值。
-
-示例（将模型替换为实例已配置的别名）：
-
-```bash
-curl 'https://aigateway.cbnv.top/v1beta/models/gpt-oss-20b:generateContent' \
-  -H 'x-goog-api-key: <实例密钥>' \
+```sh
+curl 'https://YOUR_GATEWAY_DOMAIN/v1beta/models/gpt-oss-20b:generateContent' \
+  -H 'x-goog-api-key: YOUR_GATEWAY_API_KEY' \
   -H 'Content-Type: application/json' \
   -d '{"contents":[{"role":"user","parts":[{"text":"你好"}]}]}'
 ```
 
-支持常见文本、图片输入、函数工具调用、结构化输出及增量流转换。供应商专有内置工具、媒体生成和精确 `countTokens` 不作跨供应商模拟；无法转换的请求会明确报错。Gemini 不带 `alt=sse` 的流式请求返回 JSON 数组流。
+文本、受支持的图片输入、函数工具、结构化输出及签名回放的兼容范围取决于目标上游。Anthropic 内置搜索等供应商工具、Gemini 安全设置与缓存上下文等原生约束不能跨供应商静默降级。OpenAI 与 Anthropic 之间保留工具 `strict`；其他不能保证严格工具模式的路由提前拒绝。Gemini 字段别名冲突、无法表达的采样或输出约束返回 400；异常结束、无效工具参数或不完整流会报错。完整边界见[模型路由与协议](repo-docs/modules/routing-and-protocols.md)。
 
-跨协议转换会检查请求约束：Gemini 的非空 `safetySettings` 只能发送到 Gemini 上游；OpenAI 的 `json_object` 模式转 Anthropic 时会返回 400，可改用该路由支持的 `json_schema`。无法映射到目标协议的显式思考或输出格式配置会提前拒绝。Anthropic 文档和工具结果图片在原生 Anthropic 路由保留，无法表达它们的跨协议路由会提前拒绝。客户端回传的协议元数据必须与可见消息、思考内容和工具调用一致；OpenAI 上游不能通过附加另一协议的完整内容字段替换后续历史。
+## 用量与资源限制
 
-Gemini 上游返回的图片可通过普通响应或流式响应保留图片数据与签名。Anthropic 转为其他客户端协议时，带签名思考和工具参数会按完整内容块输出，以便下一轮原样回放；普通文本继续增量返回。
+公开首页只读缓存汇总，管理员刷新才查询 Cloudflare 用量。缓存为 5 分钟，同期刷新会合并；按 Account ID 去重，每批最多 20 个账号、并发最多 4 个查询。其他供应商用量应在各自控制台查看。
 
-原生 Anthropic 流也会校验事件结构；无法识别的诊断数据或格式异常事件将返回通用错误并终止，不直接回传上游原文。
+| 操作 | 资源边界与影响 |
+| --- | --- |
+| 登录 / 管理 / 模型 JSON 输入 | 实际读取字节上限分别为 16 KiB / 1 MiB / 16 MiB，含内嵌 base64；超限 413，无效 JSON 400 |
+| 模型响应 | 等待响应头或响应体连续空闲 120 秒中止；最多 32 MiB |
+| 账号故障切换 | 仅明确的 401、403、404、429 拒绝最多尝试三个匹配账号；不确定网络结果、无效成功响应及服务器错误不重新生成 |
+| 通用上游连接测试 | 只读模型目录，不代表所有模型都可调用 |
+| Antigravity 连接测试 | 验证登录和项目，不生成回答 |
+| Cloudflare 连接测试 | 含一次小型向量推理，会消耗额度；15 秒响应头/闲置超时、1 MiB 响应上限 |
 
-非法工具参数、上游错误与缺少正常结束标记的流会明确报错。JSON 与 SSE 错误统一识别和脱敏，错误后结束转发。启用 `enable_request_signal` 后，客户端取消会触发网关中止上游连接；实际停止计算及计费取决于上游服务。等待响应头或响应体连续无数据超过 120 秒时中止，单次响应最多 32 MiB。只有明确的鉴权、模型不存在或限流拒绝会尝试其他账号，最多 3 个；网络结果不确定、无效成功响应或服务器错误不会重新生成，避免重复消耗配额。
+上游错误与 SSE 元信息会脱敏，正常模型文本及签名保持原值。客户端取消会传播到上游连接，但不能据此认定上游已停止计算或计费。向量输出校验数量、索引、维度和编码，无效结果返回 502 且不换账号重复生成。更多说明见[上游与配额](repo-docs/modules/upstream-and-quota.md)。
 
-## 部署配置归属
+## 本地验证与贡献
 
-以自己的 Wrangler 配置与部署账号为准，不复用文档中的个人账号或固定域名。配置保存在对应账号的 KV 和 SQLite Durable Object；已有实例迁移时须保留 Durable Object 中的当前配置，并单独保留管理员 Secret，不能用早期 KV 快照替代当前状态。
+回归测试需要 Node.js 24+、Python 3.10+ 和 Git，无需根目录 npm 安装。测试使用模拟上游与存储；Python 和 Git 用于临时仓库中的维护护栏测试。
 
-## 🧪 本地验证
-
-使用 Node.js 24 或更新版本运行回归测试，无需安装项目依赖，也不会请求真实云服务：
-
-```bash
+```sh
 node --test tests/*.test.mjs
 ```
 
-测试覆盖配置更新与密钥撤销、账号凭据隔离、模型映射、三种客户端与三种通用上游的 JSON/SSE 交叉调用、并行工具调用、流取消和 UTF-8 分片、Gemini 模型目录与向量接口，以及 Antigravity 登录刷新和协议转换。测试使用模拟上游，不代表已验证某个真实账号的模型权限。
+测试覆盖鉴权和并发配置、凭据隔离、账号选路、协议 JSON/SSE 转换、工具与签名回放、取消和响应边界、向量以及 OAuth 刷新。实际运行记录见[指南变更记录](repo-docs/change-log.md)，不以模拟结果声称真实账号权限、生产持久化或线上部署已验收。
 
-## 上游更新
+新克隆的提交护栏安装、Commit Message 模板、验证范围与历史整理要求见[贡献指南](CONTRIBUTING.md)。提交前阅读 [Agent 约束](AGENTS.md)；安全问题按[安全说明](SECURITY.md)处理。
 
-启用 fork 的上游同步工作流后，每天检查更新。候选代码先在只读权限任务中运行回归测试，再由独立任务创建 `codex/upstream-*` 分支和草稿 PR。经人工审核后合入 `main`；工作流不自动合并或部署，持有仓库写令牌的任务不会执行候选代码。GitHub Actions 设置需要允许创建 PR；合并冲突或上游工作流变更会停止自动提议，需人工处理。使用的 Actions 固定到完整提交 SHA。
+### 文档站
 
-## 🤝 致谢
-
-特别感谢 **[Cloudflare](https://www.cloudflare.com/)** 提供强大且免费的 Workers AI 服务和 Pages 托管平台！
-
-## 许可
-
-本仓库采用 [MIT License](LICENSE)，再分发时保留原版权与许可声明。
-
-## 源码阅读与文档站
-
-从[中文阅读路径](repo-docs/README.md)进入[一次真实主流程](repo-docs/walkthroughs/one-real-run.md)，再查[代码地图](repo-docs/code-map.md)与[源码证据](repo-docs/references/source-evidence.md)。指南明确限定覆盖范围，不把未运行的测试写成通过。
-
-文档站采用 VitePress 默认主题，依赖与业务项目分开安装。默认输出 `docs-site/.vitepress/dist/`；独立核验可在构建命令后加 `-- --outDir <仓库外绝对目录>`。指南正文只维护 `repo-docs/`，站点通过 include 读取；网页中的仓库源码链接显示为精确文件路径，不复制源码或本机资源。
+指南正文以中文维护在 `repo-docs/`，VitePress 页面通过 include 读取，采用默认主题。依赖与业务代码独立安装：
 
 ```sh
 npm --prefix docs-site ci
-npm --prefix docs-site run docs:dev -- --host 127.0.0.1
 npm --prefix docs-site run docs:build
 ```
 
-文档站采用 VitePress 默认主题；默认输出 `docs-site/.vitepress/dist/`，独立验证使用 `-- --outDir <仓库外绝对目录>`。指南正文由 repo-docs include 引入，源码链接在网页中显示为精确路径。
+默认输出为 `docs-site/.vitepress/dist/`；隔离构建可追加 `-- --outDir <仓库外绝对目录>`。源码链接在站点中显示精确仓库路径，不复制源码或本机资源。
+
+本地预览使用 `npm --prefix docs-site run docs:dev -- --host 127.0.0.1`；`npm --prefix docs-site run test:smoke` 会启动临时本地服务，检查初始搜索、正文热更新和文件访问边界。VitePress 1.6.4 的开发搜索索引需重启服务刷新，静态构建会重新建立索引。依赖版本与安全补丁以[文档站清单](docs-site/package.json)和锁文件为准。
+
+## 上游更新
+
+GitHub fork 的同步工作流每日检查上游：只读任务先合并候选代码并运行回归，独立写入任务再重建相同文件树，创建 `codex/upstream-*` 分支及草稿 PR。人工审核后合入；工作流不自动合并或部署，持有写令牌的任务不执行候选代码。需允许 GitHub Actions 创建 PR；冲突或上游工作流变动转人工处理，Actions 固定到完整提交 SHA。
+
+## 致谢与许可
+
+感谢上游 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 和 [Cloudflare](https://www.cloudflare.com/) 的平台与开源生态。
+
+本项目按 [GNU GPLv3](LICENSE)（`GPL-3.0-only`）开源。原 WorkersAI2API 的 MIT 版权与许可全文保留在 [上游许可](LICENSES/WorkersAI2API-MIT.txt)，来源及分发说明见 [NOTICE](NOTICE)；第三方依赖保留各自许可证。再分发时保留适用的版权与许可声明。

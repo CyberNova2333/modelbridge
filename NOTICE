@@ -1,0 +1,23 @@
+ModelBridge / 模桥
+Copyright (c) 2026 CyberNova and contributors
+
+ModelBridge is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 only (SPDX-License-Identifier: GPL-3.0-only).
+
+ModelBridge is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE. See LICENSE for the full GNU General Public License.
+
+ModelBridge is derived from WorkersAI2API:
+https://github.com/cmliussss2024/WorkersAI2API
+Copyright (c) 2026 cmliussss2024
+
+The original upstream code was provided under the MIT License. Its original
+copyright, permission and warranty notices are preserved without modification
+in LICENSES/WorkersAI2API-MIT.txt. Keep those notices when redistributing.
+The GPLv3 distribution terms for this combined project do not remove the
+upstream copyright or license grant for the original material.
+
+Third-party dependencies retain their respective licenses. Their notices are
+provided with the dependencies; the project license does not replace them.
