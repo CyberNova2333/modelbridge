@@ -4343,7 +4343,7 @@ async function handleLandingPage(request, env, ctx) {
 	<meta charset="UTF-8">
 	<meta name="robots" content="noindex, nofollow">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>${PROJECT_DISPLAY_NAME} · API Gateway</title>
+	<title>${PROJECT_DISPLAY_NAME}</title>
 	<link rel="icon" href="${PROJECT_ICON_DATA_URI}">
 	<script>${gatewayChartRuntime.toString()}; gatewayChartRuntime();</script>
 	<style>
@@ -4434,14 +4434,15 @@ async function handleLandingPage(request, env, ctx) {
 		.floating-btn:hover { color: var(--text-main); background: var(--btn-secondary-hover); border-color: var(--input-border); }
 		.floating-btn.primary-action { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; width: auto; padding: 0 13px; gap: 8px; }
 		.action-label { font-size: 12px; font-weight: 600; }
-		.dashboard-container { max-width: 1080px; width: 100%; display: flex; flex-direction: column; gap: 24px; flex: 1; padding: 64px 0 48px; }
-		.hero { display: flex; justify-content: space-between; align-items: flex-end; gap: 40px; padding: 0 0 20px; }
+		.project-title { margin: 0; line-height: 1; }
+		.project-title .project-brand-wordmark { font-size: 32px; }
+		.project-title .project-brand-icon { width: 48px; height: 48px; }
+		.dashboard-container { max-width: 1080px; width: 100%; display: flex; flex-direction: column; gap: 24px; flex: 1; padding: 32px 0 48px; }
+		.hero { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; padding: 0 0 4px; }
 		.eyebrow { display: flex; align-items: center; gap: 8px; color: var(--accent-color); font: 600 11px/1.5 Consolas, monospace; letter-spacing: 1.8px; margin-bottom: 20px; }
 		.eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-		.hero h1 { font-size: clamp(30px, 4vw, 48px); font-weight: 650; letter-spacing: -1.7px; line-height: 1.25; }
-		.hero h1 span { color: var(--accent-color); }
-		.hero-description { color: var(--text-muted); font-size: 14px; line-height: 1.9; margin-top: 20px; max-width: 460px; }
-		.endpoint-list { display: flex; flex-direction: column; gap: 12px; padding-bottom: 4px; flex-shrink: 0; }
+		.hero-description { color: var(--text-muted); font-size: 14px; line-height: 1.9; margin: 0; }
+		.endpoint-list { display: flex; flex-wrap: wrap; gap: 24px; padding-bottom: 4px; }
 		.endpoint-label { font-size: 12px; font-weight: 600; letter-spacing: .6px; color: var(--text-muted); margin-bottom: 6px; }
 		.endpoint-list code { display: inline-block; font: 12px/1.6 Consolas, monospace; background: var(--accent-soft); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; color: var(--accent-color); box-shadow: inset 0 1px 0 rgba(12,92,171,.04); }
 		.dashboard-grid { display: grid; grid-template-columns: .9fr 1.3fr; gap: 20px; width: 100%; }
@@ -4491,11 +4492,9 @@ async function handleLandingPage(request, env, ctx) {
 		@media (max-width: 768px) {
 			body { padding: 0 22px; }
 			.site-header { min-height: 78px; }
-			.dashboard-container { padding: 40px 0 32px; gap: 20px; }
+			.dashboard-container { padding: 24px 0 32px; gap: 20px; }
 			.hero { flex-direction: column; align-items: flex-start; gap: 24px; padding-bottom: 4px; }
-			.hero h1 { font-size: 32px; letter-spacing: -1.2px; }
 			.eyebrow { margin-bottom: 16px; }
-			.hero-description { margin-top: 16px; }
 			.endpoint-list { flex-direction: row; flex-wrap: wrap; gap: 14px; }
 			.endpoint-list code { font-size: 12px; }
 			.dashboard-grid { grid-template-columns: 1fr; gap: 16px; }
@@ -4512,8 +4511,8 @@ async function handleLandingPage(request, env, ctx) {
 			.action-btn-group { gap: 7px; }
 			.action-label { display: none; }
 			.floating-btn.primary-action { width: 38px; padding: 0; }
-			.dashboard-container { padding-top: 34px; }
-			.hero h1 { font-size: 32px; }
+			.project-title .project-brand-wordmark { font-size: 22px; }
+			.project-title .project-brand-icon { width: 36px; height: 36px; }
 			.hero-description { font-size: 12px; }
 			.public-chart-wrapper { flex-direction: column !important; height: auto !important; gap: 20px !important; padding-top: 4px; }
 			.public-chart-wrapper > div:nth-child(2) { width: 100% !important; height: auto !important; }
@@ -4567,7 +4566,7 @@ async function handleLandingPage(request, env, ctx) {
 <body>
 
 	<header class="site-header">
-		${projectBrandMarkup()}
+		<h1 class="project-title" aria-label="${PROJECT_DISPLAY_NAME}">${projectBrandMarkup()}</h1>
 	<div class="action-btn-group">
 		<button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
 			<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
@@ -4600,11 +4599,7 @@ async function handleLandingPage(request, env, ctx) {
 
 	<main class="dashboard-container">
 		<section class="hero">
-			<div>
-				<div class="eyebrow">CLOUDFLARE WORKERS AI</div>
-				<h1>你的模型，<br><span>一个 API 入口。</span></h1>
-				<p class="hero-description">集中管理账号、调用密钥和模型映射，<br>随时查看服务用量。</p>
-			</div>
+			<p class="hero-description">集中管理账号、调用密钥和模型映射，随时查看服务用量。</p>
 			<div class="endpoint-list">
 				<div><div class="endpoint-label">OPENAI COMPATIBLE</div><code>/v1/chat/completions</code></div>
 				<div><div class="endpoint-label">ANTHROPIC COMPATIBLE</div><code>/v1/messages</code></div>

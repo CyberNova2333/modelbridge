@@ -1,8 +1,6 @@
-# 模桥 ModelBridge
+# ![模桥 ModelBridge](assets/modelbridge-logo.svg)
 
 **简体中文** | [English](README.en.md)
-
-![模桥 ModelBridge](assets/modelbridge-logo.svg)
 
 模桥 ModelBridge 是部署在 Cloudflare Workers 上的多模型、多协议 API 网关。配置上游账号和模型别名后，客户端可以通过 OpenAI、Anthropic 或 Gemini 接口调用受支持的模型，并在蓝色管理面板管理账号、调用密钥和 Cloudflare 用量。
 
