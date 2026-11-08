@@ -9,10 +9,10 @@
 本地构建核对可在此目录执行：
 
 ```sh
-npx wrangler deploy --dry-run
+pnpm dlx wrangler deploy --dry-run
 ```
 
-正式发布由维护者单独执行 `npx wrangler deploy --keep-vars`；本仓库构建脚本不会执行部署。保留旧 DO 作为共享权威时可使用 `state-service` 桥接项目；改用自建 SQLite 时，应完成显式配置迁移并切换所有网关，避免两份权威同时接受写入。
+正式发布由维护者单独执行 `pnpm dlx wrangler deploy --keep-vars`；本仓库构建脚本不会执行部署。保留旧 DO 作为共享权威时可使用 `state-service` 桥接项目；改用自建 SQLite 时，应完成显式配置迁移并切换所有网关，避免两份权威同时接受写入。
 
 重新构建会覆盖生成目录中的模板；需要长期保存的部署配置应放到自己的受控位置。构建器拒绝覆盖含无关文件的输出目录，可以通过 `--out-dir <新目录>` 生成新副本。
 

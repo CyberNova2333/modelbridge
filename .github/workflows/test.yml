@@ -23,8 +23,8 @@ jobs:
           node-version: '24'
       - name: Check maintenance test prerequisites
         run: python3 -c "import sys; assert sys.version_info >= (3, 10)"
-      - run: npm run check
-      - run: npm run build
+      - run: pnpm run check
+      - run: pnpm run build
       - run: node --test tests/*.test.mjs
 
   docs:
@@ -35,12 +35,14 @@ jobs:
         with:
           persist-credentials: false
       - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: docs-site/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
           cache: pnpm
           cache-dependency-path: docs-site/pnpm-lock.yaml
       - run: pnpm --dir docs-site install --frozen-lockfile
-      - run: npm --prefix docs-site audit --audit-level=moderate
-      - run: npm --prefix docs-site run test:smoke
+      - run: pnpm --dir docs-site audit --audit-level=moderate
+      - run: pnpm --dir docs-site run test:smoke
       - run: pnpm --dir docs-site run docs:build

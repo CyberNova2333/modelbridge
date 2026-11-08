@@ -70,8 +70,8 @@ cd modelbridge
 先安装 Node.js 24+，使用 Wrangler 登录自己的 Cloudflare 账号并创建 KV：
 
 ```sh
-npx wrangler login
-npx wrangler kv namespace create KV
+pnpm dlx wrangler login
+pnpm dlx wrangler kv namespace create KV
 ```
 
 仓库的 `wrangler.toml` 保留维护者实例的部署配置。新建实例前修改以下项目，已有实例升级时保留原有存储绑定：
@@ -95,8 +95,8 @@ id = "YOUR_KV_NAMESPACE_ID"
 保留 `compatibility_flags` 中的 `global_fetch_strictly_public`、`enable_request_signal`，以及 `observability.redact_query_string = true`。前两个[兼容性开关](https://developers.cloudflare.com/workers/configuration/compatibility-flags/)分别让全局 fetch 按公共互联网路径路由（避免直达自身区域源站的捷径）、启用入站请求取消信号；后一个[日志设置](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/)从日志和追踪请求 URL 中移除查询字符串。公共路由开关不等于完整的私网访问防火墙。
 
 ```sh
-npx wrangler deploy
-npx wrangler secret put ADMIN_PASSWORD
+pnpm dlx wrangler deploy
+pnpm dlx wrangler secret put ADMIN_PASSWORD
 ```
 
 `ADMIN_PASSWORD` 是必需的管理员 Secret；缺少它时所有访问被拦截。已有实例升级无需重复设置。不要把密码或上游凭据写入 `wrangler.toml`。
@@ -124,7 +124,7 @@ Pages 与托管 Worker 应使用相同版本代码，升级时先更新 Worker�
 
 ### 自建状态服务 + Cloudflare / EdgeOne Makers / 阿里云 ESA
 
-使用 Node.js 24+ 生成部署项目，无需安装根目录 npm 依赖：
+使用 Node.js 24+ 生成部署项目，无需安装根目录 pnpm 依赖：
 
 ```sh
 node tools/build-platforms.mjs
@@ -189,7 +189,7 @@ Cloudflare 或通用上游需要固定账号时可用 `upstream:账号ID:模型I
 也可使用环境 Secret：
 
 ```sh
-npx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
+pnpm dlx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
 ```
 
 可选 `ANTIGRAVITY_PROJECT_ID`、`ANTIGRAVITY_EMAIL`；`OAUTH_CLIENT_ID` 与 `OAUTH_CLIENT_SECRET` 必须成对配置，账号级设置优先。多账号环境配置使用 `ANTIGRAVITY_ACCOUNTS` JSON 数组，字段示例见[上游与配额](repo-docs/modules/upstream-and-quota.md)。旧的 `ya29.` Access Token 仍兼容，但不能自动续期。
@@ -240,7 +240,7 @@ curl 'https://YOUR_GATEWAY_DOMAIN/v1beta/models/gpt-oss-20b:generateContent' \
 
 ## 本地验证与贡献
 
-回归测试需要 Node.js 24+、Python 3.10+ 和 Git，无需根目录 npm 安装。模型上游与 DO/KV 使用模拟；自建状态另以真实临时 SQLite、独立进程和本地 HTTP 验证。Python 和 Git 用于临时仓库中的维护护栏测试。
+回归测试需要 Node.js 24+、Python 3.10+ 和 Git，无需根目录 pnpm 安装。模型上游与 DO/KV 使用模拟；自建状态另以真实临时 SQLite、独立进程和本地 HTTP 验证。Python 和 Git 用于临时仓库中的维护护栏测试。
 
 ```sh
 node --test tests/*.test.mjs
@@ -255,13 +255,13 @@ node --test tests/*.test.mjs
 指南正文以中文维护在 `repo-docs/`，VitePress 页面通过 include 读取，采用默认主题。依赖与业务代码独立安装：
 
 ```sh
-npm --prefix docs-site ci
-npm --prefix docs-site run docs:build
+pnpm --dir docs-site install --frozen-lockfile
+pnpm --dir docs-site run docs:build
 ```
 
 默认输出为 `docs-site/.vitepress/dist/`；隔离构建可追加 `-- --outDir <仓库外绝对目录>`。源码链接在站点中显示精确仓库路径，不复制源码或本机资源。
 
-本地预览使用 `npm --prefix docs-site run docs:dev -- --host 127.0.0.1`；`npm --prefix docs-site run test:smoke` 会启动临时本地服务，检查初始搜索、正文热更新和文件访问边界。VitePress 1.6.4 的开发搜索索引需重启服务刷新，静态构建会重新建立索引。依赖版本与安全补丁以[文档站清单](docs-site/package.json)和锁文件为准。
+本地预览使用 `pnpm --dir docs-site run docs:dev -- --host 127.0.0.1`；`pnpm --dir docs-site run test:smoke` 会启动临时本地服务，检查初始搜索、正文热更新和文件访问边界。VitePress 1.6.4 的开发搜索索引需重启服务刷新，静态构建会重新建立索引。依赖版本与安全补丁以[文档站清单](docs-site/package.json)和锁文件为准。
 
 ## 上游更新
 

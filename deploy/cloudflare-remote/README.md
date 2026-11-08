@@ -12,7 +12,7 @@
 
 状态服务的 `MODELBRIDGE_STATE_ORIGINS` 还必须包含此网关的精确 HTTPS 来源，例如 `https://gateway.example`。网关域名和状态服务域名职责不同；来源列表不接受尾斜杠、路径或通配符。
 
-检查 `wrangler.toml` 项目名称后，可用 `npx wrangler deploy --dry-run` 检查本地打包。维护者验收后单独执行 `npx wrangler deploy --keep-vars`；构建脚本不会发布。部署时保留 `enable_request_signal`，平台必须提供真实请求取消信号。
+检查 `wrangler.toml` 项目名称后，可用 `pnpm dlx wrangler deploy --dry-run` 检查本地打包。维护者验收后单独执行 `pnpm dlx wrangler deploy --keep-vars`；构建脚本不会发布。部署时保留 `enable_request_signal`，平台必须提供真实请求取消信号。
 
 此入口严格使用远程状态，URL 或令牌缺失、格式无效、状态服务故障都会拒绝请求。即使环境仍残留旧 `CONFIG_STORE` 或 KV 绑定，也不会恢复旧配置。迁移已有实例需先按主指南导出并导入配置，所有需要共享配置的网关必须使用同一状态库；不应让旧 DO 和 SQLite 同时接受配置写入。
 

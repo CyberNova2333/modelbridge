@@ -148,12 +148,12 @@ node --test tests/*.test.mjs
 仓库另提供显式运行的部署验收工具。它们不属于默认单元测试，需要 Docker Linux 引擎或下载指定版本的厂商 CLI；不会登录、上传或发布项目：
 
 ```sh
-npm run verify:container -- --keep-image
+pnpm run verify:container -- --keep-image
 # 用上一命令报告中的 image 值替换下面的占位值。
-npm run verify:tls -- --state-image <IMAGE_FROM_PREVIOUS_REPORT>
-npm run verify:edge-builds
+pnpm run verify:tls -- --state-image <IMAGE_FROM_PREVIOUS_REPORT>
+pnpm run verify:edge-builds
 # 可选：用隔离 Linux 容器增加 ESA 官方 CLI + EW2 本地检查。
-npm run verify:edge-builds -- --esa-docker
+pnpm run verify:edge-builds -- --esa-docker
 ```
 
 容器验收使用新的数据库卷、合成凭据和专属 Docker 内网，不发布主机端口，检查非 root/只读容器运行、运行文件系统没有包管理器、数据库重启、密钥与会话撤销、在线备份，以及另一新卷恢复到准确时间点。TLS 验收在同样隔离的内网中运行生产 Caddy 模板，仅为测试加上内部 CA；客户端验证真实证书链、主机名、协议协商、认证及状态读写。混合提供 h2 和 HTTP 1.1 时必须选 HTTP 1.1，仅提供 h2 时不得协商到 h2。它不会把 CA 加入宿主机信任库，也不会申请公网证书。两个工具只清理核对过归属标签的自有资源；`--keep-image` 保留的测试镜像由维护者在后续使用完成后按报告中的精确名称删除。
@@ -162,7 +162,7 @@ npm run verify:edge-builds -- --esa-docker
 
 厂商 CLI 工具使用白名单子进程环境、隔离配置与固定版本，并把报告和日志留在输出的系统临时目录。Wrangler 本地 smoke 仅向回环地址检查路由，允许其自动生成的 localhost 证书；该检查不作为 TLS 信任证据，完整证书校验由上面的独立 TLS 工具执行。没有官方本地验收能力的平台会在报告中显示未验证，不会尝试匿名发布或账户登录。
 
-CLI 安装禁用依赖生命周期脚本，使用所需平台的预构建可选组件；执行 CLI 本身仍是在运行供应商代码，隔离 HOME 和环境变量不是操作系统沙箱。每次验收保留实际解析的锁文件及 registry 完整性摘要：主机为临时目录的 `tools/package-lock.json`，ESA 容器为 `audit/esa-package-lock.json`。顶层 CLI 版本固定不代表传递依赖跨次完全相同；这些锁文件记录该次解析结果，不是仓库长期锁定，也不是已通过漏洞审计的声明。
+CLI 安装禁用依赖生命周期脚本，使用所需平台的预构建可选组件；执行 CLI 本身仍是在运行供应商代码，隔离 HOME 和环境变量不是操作系统沙箱。每次验收保留实际解析的锁文件及 registry 完整性摘要：主机为临时目录的 `tools/pnpm-lock.yaml`，ESA 容器为 `audit/esa-pnpm-lock.yaml`。顶层 CLI 版本固定不代表传递依赖跨次完全相同；这些锁文件记录该次解析结果，不是仓库长期锁定，也不是已通过漏洞审计的声明。
 
 当前 ESA 官方本地 EW2 可以构建并加载本项目入口，具有所需 Web API，但 `dev` 未提供云端环境变量的第三个 `env` 参数。因此缺配置时的 503 和运行时能力探针不代表状态服务端到端已通过 ESA 云端验收。Makers 仍需在明确授权的实际项目中验证；CLI 的匿名 `deploy` 也属于发布，不能当作本地检查。
 
@@ -172,7 +172,7 @@ CLI 安装禁用依赖生命周期脚本，使用所需平台的预构建可选�
 
 ## 怎样读取依赖审计结果
 
-网关与自建服务没有运行时 npm 依赖，但依赖边缘平台运行时、Node 内嵌 SQLite/OpenSSL、容器操作系统与 HTTPS 代理。文档站、厂商 CLI、CI Actions 属于另外的构建与维护范围。文档站 `npm audit` 为零，不能推导这些范围同样为零。
+网关与自建服务没有运行时包依赖，但依赖边缘平台运行时、Node 内嵌 SQLite/OpenSSL、容器操作系统与 HTTPS 代理。文档站、厂商 CLI、CI Actions 属于另外的构建与维护范围。文档站 `pnpm audit` 为零，不能推导这些范围同样为零。
 
 审计应记录实际版本、镜像 digest、锁文件和日期，再结合入口判断影响。例如基础镜像自带 npm 的 Undici 不等于 Node 内置 `fetch`；Go HTTP/2 解析发生在 RPC Bearer 认证之前；CLI 的压缩包解压漏洞也不等于状态服务可被远程利用。组件回移补丁时版本字符串可能未变，需查供应商公告和实际修复；扫描器与发行版说明有冲突时保留未确认状态，不能自行忽略告警。当前已知项、缓解及未消除的依赖风险见[最后一轮审查记录](../change-log.md)。
 

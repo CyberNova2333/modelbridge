@@ -35,7 +35,7 @@
 node --test tests/*.test.mjs
 ```
 
-测试使用模拟模型上游；自建状态集成另使用真实临时 SQLite、独立进程与本地 HTTP，原生 DO/KV 仍为模拟。开发 Worker 前，按根 README 配置绑定与本地 Secret，再运行 `npx wrangler dev`；这些本地验证不代表真实账号或云端迁移已验收。
+测试使用模拟模型上游；自建状态集成另使用真实临时 SQLite、独立进程与本地 HTTP，原生 DO/KV 仍为模拟。开发 Worker 前，按根 README 配置绑定与本地 Secret，再运行 `pnpm dlx wrangler dev`；这些本地验证不代表真实账号或云端迁移已验收。
 
 独立文档站使用 VitePress 默认主题，通过 include 读取本指南。安装与构建见根 README，构建产物独立于业务界面。网页中的指南链接正常导航；指南之外的仓库源码链接显示为精确路径，源码和本机文件不会随站点发布。
 
