@@ -3,19 +3,36 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const source = await readFile(new URL('../_worker.js', import.meta.url), 'utf8');
-const tick = () => new Promise(resolve => setImmediate(resolve));
 let sequence = 0;
 const cf = { id: 'cf', name: 'Fixture', provider: 'cloudflare', accountId: 'fixture/account?other#part', apiToken: 'fixture/secret+token', status: 'active', models: [] };
 const oa = { id: 'oa', name: 'Fixture', provider: 'openai', accountId: '', apiToken: 'fixture-openai', status: 'active', models: ['vector'] };
 
 async function harness(network, accounts = [cf], fakeTimers = false) {
   const name = '__upstreamReviewFix' + sequence++;
-  const shared = { network, calls: [], timers: [] };
+  const waiters = new Set();
+  const shared = { network, calls: [], timers: [], refreshJoins: 0,
+    notify() {
+      for (const waiter of waiters) if (waiter.ready(shared)) {
+        waiters.delete(waiter);
+        waiter.resolve();
+      }
+    },
+    waitFor(ready) {
+      if (ready(shared)) return Promise.resolve();
+      return new Promise(resolve => waiters.add({ ready, resolve }));
+    },
+  };
   globalThis[name] = shared;
-  const prefix = `const fixture=globalThis.${name}; const fetch=async(...args)=>{fixture.calls.push(args);return fixture.network(...args);};\n` + (fakeTimers
-    ? 'const setTimeout=(fn,ms)=>{const timer={fn,ms,active:true};fixture.timers.push(timer);return timer;};const clearTimeout=timer=>{if(timer)timer.active=false;};\n'
+  const prefix = `const fixture=globalThis.${name}; const fetch=async(...args)=>{fixture.calls.push(args);fixture.notify();return fixture.network(...args);};\n` + (fakeTimers
+    ? 'const setTimeout=(fn,ms)=>{const timer={fn,ms,active:true};fixture.timers.push(timer);fixture.notify();return timer;};const clearTimeout=timer=>{if(timer)timer.active=false;fixture.notify();};\n'
     : '');
-  const module = await import('data:text/javascript;base64,' + Buffer.from(prefix + source + '\nexport {getAntigravityToken};').toString('base64'));
+  const module = await import('data:text/javascript;base64,' + Buffer.from(prefix + source + '\nexport {getAntigravityToken,antigravityTokenRefreshes};').toString('base64'));
+  const hasRefresh = module.antigravityTokenRefreshes.has.bind(module.antigravityTokenRefreshes);
+  module.antigravityTokenRefreshes.has = key => {
+    const present = hasRefresh(key);
+    if (present) { shared.refreshJoins++; shared.notify(); }
+    return present;
+  };
   const values = new Map([['config', { accounts: structuredClone(accounts), apiKeys: [{ id: 'key', key: 'fixture-client' }], customModelMap: { vector: 'openai:vector' } }]]);
   let queue = Promise.resolve();
   const env = { ADMIN_PASSWORD: 'fixture-admin', KV: { async get() { return null; } } };
@@ -58,12 +75,12 @@ test('Cloudflare connection diagnostics redact stored credentials and confine ac
   } finally { h.close(); }
 });
 
-test('Cloudflare connection test cancellation aborts all three pending upstream requests without retrying', async () => {
+test('Cloudflare connection test cancellation aborts all three pending upstream requests without retrying', { timeout: 10000 }, async () => {
   const h = await harness(() => new Promise(() => {}), [cf], true);
   try {
     const client = new AbortController();
     const pending = h.dispatch('/api/accounts/test', { id: cf.id, apiToken: '********' }, client.signal);
-    for (let index = 0; index < 20 && h.calls.length < 3; index++) await tick();
+    await h.waitFor(state => state.calls.length >= 3);
     assert.equal(h.calls.length, 3);
     client.abort();
     assert.equal((await (await pending).json()).success, false);
@@ -73,7 +90,7 @@ test('Cloudflare connection test cancellation aborts all three pending upstream 
   } finally { h.close(); }
 });
 
-test('Cloudflare connection tests bound response headers, stalled bodies and diagnostic size', async () => {
+test('Cloudflare connection tests bound response headers, stalled bodies and diagnostic size', { timeout: 10000 }, async () => {
   for (const phase of ['headers', 'body', 'size']) {
     let cancelled = 0;
     const h = await harness(() => phase === 'headers' ? new Promise(() => {})
@@ -81,9 +98,10 @@ test('Cloudflare connection tests bound response headers, stalled bodies and dia
         : new Response('x'.repeat(1024 * 1024 + 1)), [cf], true);
     try {
       const pending = h.dispatch('/api/accounts/test', { id: cf.id, apiToken: '********' });
-      for (let index = 0; index < 20 && (h.calls.length < 3 || (phase === 'body' && h.timers.filter(timer => timer.active).length !== 3)); index++) await tick();
-      await tick();
       if (phase !== 'size') {
+        // Header timers are armed before fetch; body timers replace them only
+        // after each response reader is acquired. Wait for all three transitions.
+        await h.waitFor(state => state.calls.length >= 3 && state.timers.length >= (phase === 'body' ? 6 : 3));
         const timers = h.timers.filter(timer => timer.active);
         assert.equal(timers.length, 3);
         assert.ok(timers.every(timer => timer.ms === 15000));
@@ -159,14 +177,14 @@ test('Gemini embedding endpoint rejects malformed OpenAI vectors instead of emit
   } finally { h.close(); }
 });
 
-test('OAuth refresh joins concurrent requests, bypasses completed cache on force, and isolates changed credentials', async () => {
+test('OAuth refresh joins concurrent requests, bypasses completed cache on force, and isolates changed credentials', { timeout: 10000 }, async () => {
   let release;
   const gate = new Promise(resolve => { release = resolve; });
   const h = await harness(async (_url, options) => { await gate; return Response.json({ access_token: 'access-' + options.body.get('refresh_token'), expires_in: 3600 }); }, []);
   try {
     const account = { id: 'ag', accountId: 'fixture@example.invalid', refreshToken: 'refresh-one' };
     const pending = Array.from({ length: 12 }, () => h.module.getAntigravityToken(account, h.env));
-    for (let index = 0; index < 20; index++) await tick();
+    await h.waitFor(state => state.calls.length >= 1 && state.refreshJoins >= 11);
     assert.equal(h.calls.length, 1);
     release();
     assert.deepEqual(await Promise.all(pending), Array(12).fill('access-refresh-one'));
@@ -180,7 +198,7 @@ test('OAuth refresh joins concurrent requests, bypasses completed cache on force
   } finally { release(); h.close(); }
 });
 
-test('OAuth failed refresh is shared and removed, and forced refresh joins existing work', async () => {
+test('OAuth failed refresh is shared and removed, and forced refresh joins existing work', { timeout: 10000 }, async () => {
   let release, fail = true;
   let gate = new Promise(resolve => { release = resolve; });
   const h = await harness(async () => { await gate; return fail ? Response.json({}, { status: 400 }) : Response.json({ access_token: 'fresh-access', expires_in: 3600 }); }, []);
@@ -188,7 +206,7 @@ test('OAuth failed refresh is shared and removed, and forced refresh joins exist
     const account = { id: 'ag', accountId: 'fixture@example.invalid', refreshToken: 'refresh-one' };
     const pending = Array.from({ length: 6 }, (_, index) => h.module.getAntigravityToken(account, h.env, { forceRefresh: !!(index % 2) }));
     const results = Promise.allSettled(pending);
-    for (let index = 0; index < 20; index++) await tick();
+    await h.waitFor(state => state.calls.length >= 1 && state.refreshJoins >= 5);
     assert.equal(h.calls.length, 1);
     release();
     assert.ok((await results).every(result => result.status === 'rejected'));
@@ -196,7 +214,7 @@ test('OAuth failed refresh is shared and removed, and forced refresh joins exist
     gate = new Promise(resolve => { release = resolve; });
     const retry = h.module.getAntigravityToken(account, h.env);
     const forced = h.module.getAntigravityToken(account, h.env, { forceRefresh: true });
-    for (let index = 0; index < 20; index++) await tick();
+    await h.waitFor(state => state.calls.length >= 2 && state.refreshJoins >= 6);
     assert.equal(h.calls.length, 2);
     release();
     assert.deepEqual(await Promise.all([retry, forced]), ['fresh-access', 'fresh-access']);

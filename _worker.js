@@ -1,7 +1,7 @@
 /**
  * 模桥 ModelBridge
- * 一个反向代理：把 Cloudflare Workers AI 转换成 OpenAI 兼容的接口格式，
- * 支持多账号负载均衡、故障自动切换重试，还自带一个可视化管理面板。
+ * 多供应商、多协议模型网关，带账号、调用密钥和模型映射管理。
+ * 自包含的 Cloudflare 入口；其他平台通过 createGateway 注入状态与网络能力。
  */
 
 // 网页品牌独立于部署服务名；不会自动读取 Wrangler 的 Worker 名称。
@@ -10,24 +10,63 @@ const PROJECT_DISPLAY_NAME = '模桥 ModelBridge';
 const PROJECT_ICON_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><defs><linearGradient id="blue" x1="12" y1="8" x2="116" y2="128" gradientUnits="userSpaceOnUse"><stop stop-color="#3481ff"/><stop offset="1" stop-color="#1646b4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#blue)"/><rect x="1" y="1" width="126" height="126" rx="29" fill="none" stroke="#fff" stroke-opacity=".16" stroke-width="2"/><g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"><path d="M35 91V43M93 91V43M35 71C47 43 81 43 93 71" stroke-width="8"/><path d="M50 54V91M78 54V91" stroke-width="4" stroke-opacity=".55"/><path d="M25 92H103" stroke-width="8"/></g><circle cx="25" cy="92" r="6" fill="#bce4ff"/><circle cx="103" cy="92" r="6" fill="#bce4ff"/><circle cx="25" cy="92" r="2" fill="#2563eb"/><circle cx="103" cy="92" r="2" fill="#2563eb"/></svg>';
 const PROJECT_ICON_DATA_URI = 'data:image/svg+xml,' + encodeURIComponent(PROJECT_ICON_SVG);
 const PROJECT_BRAND_CSS = `
-.project-brand { display: inline-flex; align-items: center; gap: 11px; flex-shrink: 0; color: var(--text-main, #142b4b); text-decoration: none; }
-.project-brand-icon { display: block; width: 42px; height: 42px; flex: 0 0 auto; }
-.project-brand-copy { display: flex; flex-direction: column; gap: 4px; white-space: nowrap; }
-.project-brand-wordmark { font: 700 24px/1.05 Inter, 'Segoe UI', Arial, sans-serif; letter-spacing: -.9px; }
-.project-brand-wordmark span { color: #83b4ff; }
-:root[data-theme="light"] .project-brand-wordmark span { color: #2563eb; }
-.project-brand-caption { font: 500 11px/1.25 'PingFang SC', 'Microsoft YaHei', sans-serif; letter-spacing: 1.1px; color: var(--text-muted, #526d91); }
-.project-brand:focus-visible { outline: 2px solid var(--accent-color, #2563eb); outline-offset: 5px; border-radius: 5px; }
-.logo-area .project-brand { gap: 9px; }
-.logo-area .project-brand-icon { width: 36px; height: 36px; }
-.logo-area .project-brand-wordmark { font-size: 20px; letter-spacing: -.7px; }
-.logo-area .project-brand-caption { font-size: 10px; letter-spacing: .8px; }
+.project-brand { display: inline-flex; align-items: center; gap: 11px; flex-shrink: 0; color: var(--text-main, #f0f6fc); text-decoration: none; }
+.project-brand-icon { display: block; width: 36px; height: 36px; flex: 0 0 auto; border-radius: 6px; }
+.project-brand-copy { display: flex; flex-direction: column; gap: 2px; white-space: nowrap; }
+.project-brand-wordmark { font: 600 20px/1.15 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif; letter-spacing: -.4px; }
+.project-brand-wordmark span { color: #2f81f7; }
+:root[data-theme="light"] .project-brand-wordmark span { color: #0969da; }
+.project-brand-caption { font: 500 11px/1.25 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif; letter-spacing: .4px; color: var(--text-muted, #8b949e); }
+.project-brand:focus-visible { outline: 2px solid var(--accent-color, #2f81f7); outline-offset: 4px; border-radius: 6px; }
+.logo-area .project-brand { gap: 10px; }
+.logo-area .project-brand-icon { width: 32px; height: 32px; }
+.logo-area .project-brand-wordmark { font-size: 18px; letter-spacing: -.3px; }
+.logo-area .project-brand-caption { font-size: 11px; letter-spacing: .3px; }
 @media(max-width:480px) {
  .site-header { gap: 12px; }
  .project-brand, .logo-area .project-brand { gap: 8px; }
- .project-brand-icon, .logo-area .project-brand-icon { width: 34px; height: 34px; }
- .project-brand-wordmark, .logo-area .project-brand-wordmark { font-size: 19px; letter-spacing: -.65px; }
- .project-brand-caption, .logo-area .project-brand-caption { font-size: 10px; letter-spacing: .7px; }
+ .project-brand-icon, .logo-area .project-brand-icon { width: 32px; height: 32px; }
+ .project-brand-wordmark, .logo-area .project-brand-wordmark { font-size: 17px; letter-spacing: -.3px; }
+ .project-brand-caption, .logo-area .project-brand-caption { font-size: 10px; letter-spacing: .3px; }
+}
+
+/* Tactile GitHub Primer v2 Buttons & Controls */
+.btn, .floating-btn {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(31, 35, 40, 0.06);
+  transition: background-color 100ms ease, border-color 100ms ease, box-shadow 100ms ease, transform 80ms ease !important;
+}
+:root[data-theme="dark"] .btn, :root[data-theme="dark"] .floating-btn {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(1, 4, 9, 0.4);
+}
+.btn:hover:not(:disabled), .floating-btn:hover:not(:disabled) {
+  transform: translateY(-0.5px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 2px 5px rgba(31, 35, 40, 0.1);
+}
+:root[data-theme="dark"] .btn:hover:not(:disabled), :root[data-theme="dark"] .floating-btn:hover:not(:disabled) {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 2px 6px rgba(1, 4, 9, 0.55);
+}
+.btn:active:not(:disabled), .floating-btn:active:not(:disabled) {
+  transform: translateY(0.5px) scale(0.99);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.18);
+}
+.btn-primary, .floating-btn.primary-action {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--primary-bg, #0969da) 88%, #ffffff 12%) 0%, var(--primary-bg, #0969da) 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 1px 3px rgba(9, 105, 218, 0.24) !important;
+  font-weight: 600;
+}
+.btn-primary:hover:not(:disabled), .floating-btn.primary-action:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--primary-bg, #0969da) 0%, var(--primary-hover, #0860ca) 100%) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 3px 8px rgba(9, 105, 218, 0.32) !important;
+  transform: translateY(-0.5px);
+}
+.btn-secondary {
+  background: linear-gradient(180deg, var(--card-bg, #ffffff) 0%, var(--btn-secondary-bg, #f6f8fa) 100%);
+}
+:root[data-theme="dark"] .btn-secondary {
+  background: linear-gradient(180deg, #21262d 0%, #161b22 100%);
+}
+html.dn-color-shift, html.dn-color-shift * {
+  transition: background-color 0.42s ease, color 0.42s ease, border-color 0.42s ease !important;
 }
 `;
 
@@ -108,12 +147,23 @@ const DEFAULT_MODEL_MAP = {
 // Only this request may reuse its configuration snapshot. Never cache a deployment's
 // env object across requests, otherwise revoked keys can remain usable.
 const REQUEST_CONTEXT = Symbol('request-context');
+const GATEWAY_RUNTIME = Symbol('gateway-runtime');
+const REQUEST_BODY_LIMITS = new WeakMap();
 
-export default {
+// Dependencies belong to this gateway/request, never to mutable module globals.
+// Keep the default entry self-contained for existing Workers / Pages deployments.
+export function createGateway(runtime = {}) {
+	const dependencies = Object.freeze({ ...runtime });
+	return {
 	async fetch(request, env, ctx) {
 		try {
-			const requestEnv = Object.create(env);
+			const requestEnv = Object.create(env || {});
+			requestEnv[GATEWAY_RUNTIME] = dependencies;
 			requestEnv[REQUEST_CONTEXT] = { origin: new URL(request.url).origin, config: undefined };
+			if (dependencies.maxRequestBytes !== undefined) {
+				if (!Number.isSafeInteger(dependencies.maxRequestBytes) || dependencies.maxRequestBytes <= 0) throw new Error('Invalid runtime body budget');
+				REQUEST_BODY_LIMITS.set(request, dependencies.maxRequestBytes);
+			}
 			return await handleRequest(request, requestEnv, ctx);
 		} catch (error) {
 			if (error instanceof RequestBodyError) return addCORSHeaders(requestJsonErrorResponse(request, error));
@@ -122,11 +172,28 @@ export default {
 			return addCORSHeaders(Response.json({ error: { message: 'Service temporarily unavailable', type: 'server_error' } }, { status: 503 }));
 		}
 	}
-};
+	};
+}
+
+export default createGateway();
+
+function hasExternalState(env) {
+	return typeof env[GATEWAY_RUNTIME]?.state?.request === 'function';
+}
+
+function runtimeFetch(env) {
+	return env[GATEWAY_RUNTIME]?.fetch || fetch;
+}
+
+function stateRequest(env, path, init) {
+	if (hasExternalState(env)) return env[GATEWAY_RUNTIME].state.request(path, init);
+	const store = env.CONFIG_STORE.get(env.CONFIG_STORE.idFromName('app-config-v1'));
+	return store.fetch('https://config.internal' + path, init);
+}
 
 async function handleRequest(request, env, ctx) {
 		// 1. 检查是否绑定了 KV 存储
-		if (!env.KV) {
+		if (!hasExternalState(env) && !env.KV) {
 			return handleKVError(request);
 		}
 
@@ -134,7 +201,7 @@ async function handleRequest(request, env, ctx) {
 		if (!env.ADMIN_PASSWORD) {
 			return handlePasswordError(request);
 		}
-		if (!env.CONFIG_STORE) {
+		if (!hasExternalState(env) && !env.CONFIG_STORE) {
 			return Response.json({ error: { message: 'CONFIG_STORE Durable Object binding is required. See README for setup.', type: 'server_error' } }, { status: 503 });
 		}
 
@@ -217,6 +284,7 @@ class RequestBodyError extends Error {
 
 // Count actual bytes, including chunked requests, before decoding or parsing JSON.
 async function readRequestJson(request, maxBytes = API_JSON_LIMIT) {
+	maxBytes = Math.min(maxBytes, REQUEST_BODY_LIMITS.get(request) ?? maxBytes);
 	const tooLarge = () => new RequestBodyError(413, 'JSON request body exceeds the size limit.');
 	if (Number(request.headers.get('content-length')) > maxBytes) {
 		void request.body?.cancel().catch(() => {});
@@ -270,7 +338,7 @@ async function sha256(message) {
 }
 
 // ----------------------------------------------------
-// 配置由单个 Durable Object 串行更新，KV 仅用于旧配置迁移和用量缓存。
+// 配置由选定的权威存储串行更新，KV 仅用于原生 DO 的旧配置首次迁移。
 // ----------------------------------------------------
 const PROVIDER_DEFAULT_URLS = {
 	openai: 'https://api.openai.com/v1',
@@ -366,10 +434,18 @@ function validAppConfig(config) {
 		&& Object.values(config.customModelMap).every(model => typeof model === 'string' && model.length > 0);
 }
 
-export class AppConfigStore {
-	constructor(state, env) {
+export function isValidStateConfig(config) {
+	return validAppConfig(config);
+}
+
+// The business state engine is independent of its persistence adapter. Native
+// Cloudflare keeps its historical KV migration through AppConfigStore below.
+export class GatewayStateStore {
+	constructor(state, env = {}, { legacyKv = false, usageFetch } = {}) {
 		this.state = state;
 		this.env = env;
+		this.legacyKv = legacyKv;
+		this.usageFetch = usageFetch;
 	}
 
 	async fetch(request) {
@@ -378,7 +454,7 @@ export class AppConfigStore {
 			if (new URL(request.url).pathname === '/auth') return handleAdminSessionOperation(this, request);
 			let config = await this.state.storage.get('config');
 			if (config === undefined) {
-				const raw = await this.env.KV.get('config');
+				const raw = this.legacyKv ? await this.env.KV.get('config') : null;
 				config = raw === null
 					? { accounts: [], apiKeys: [], customModelMap: { ...DEFAULT_MODEL_MAP } }
 					: JSON.parse(raw);
@@ -425,10 +501,12 @@ export class AppConfigStore {
 	}
 }
 
+export class AppConfigStore extends GatewayStateStore {
+	constructor(state, env) { super(state, env, { legacyKv: true }); }
+}
+
 async function configRequest(env, operation) {
-	const id = env.CONFIG_STORE.idFromName('app-config-v1');
-	const store = env.CONFIG_STORE.get(id);
-	const response = await store.fetch('https://config.internal/', operation === undefined ? undefined : {
+	const response = await stateRequest(env, '/', operation === undefined ? undefined : {
 		method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(operation)
 	});
 	if (!response.ok) throw Object.assign(new Error(`Configuration operation failed (${response.status})`), { status: response.status });
@@ -477,7 +555,7 @@ function adminSessionToken(request, cookieOnly = false) {
 }
 
 async function adminSessionRequest(env, operation, request) {
-	if (!env.CONFIG_STORE) return { valid: false };
+	if (!hasExternalState(env) && !env.CONFIG_STORE) return { valid: false };
 	const password = String(env.ADMIN_PASSWORD || '').trim();
 	const origin = request ? new URL(request.url).origin : env[REQUEST_CONTEXT]?.origin;
 	if (!password || !origin) return { valid: false, success: false };
@@ -490,8 +568,7 @@ async function adminSessionRequest(env, operation, request) {
 		fingerprint: await sha256('admin-session-v3:' + password),
 		passwordMatched: operation.type === 'login' && typeof operation.password === 'string' && operation.password === password
 	};
-	const store = env.CONFIG_STORE.get(env.CONFIG_STORE.idFromName('app-config-v1'));
-	const response = await store.fetch('https://config.internal/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+	const response = await stateRequest(env, '/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
 	if (!response.ok) throw new Error('Session store unavailable');
 	return response.json();
 }
@@ -604,12 +681,12 @@ async function usageAccountGroups(accounts) {
 	return groups;
 }
 
-async function queryUsageAccountGroup(group, startDateTime) {
+async function queryUsageAccountGroup(group, startDateTime, networkFetch = fetch) {
 	// Analytics permissions can differ between tokens for the same real account.
 	// Only explicit authorization rejection permits a bounded credential fallback.
 	const credentials = group.credentials.slice(0, 3);
 	for (let index = 0; index < credentials.length; index++) {
-		try { return await queryGraphQL(group.id, credentials[index], startDateTime); }
+		try { return await queryGraphQL(group.id, credentials[index], startDateTime, networkFetch); }
 		catch (error) { if (!error.credentialRejected || index === credentials.length - 1) throw error; }
 	}
 	throw new Error('No Cloudflare analytics credential is available.');
@@ -655,7 +732,7 @@ async function refreshUsageStore(store, limit) {
 			const group = pending[index++];
 			try {
 				// Seven daily buckets already include today; no second query is necessary.
-				const analytics = processAnalytics(await queryUsageAccountGroup(group, start.toISOString()));
+				const analytics = processAnalytics(await queryUsageAccountGroup(group, start.toISOString(), store.usageFetch));
 				cache[group.id] = { fingerprint: group.fingerprint, status: 'active', error: null, usageToday: analytics.todayTotalNeurons, modelsToday: analytics.todayModels, history: analytics.history, timestamp: Date.now() };
 			} catch (_) {
 				const previous = cache[group.id]?.fingerprint === group.fingerprint ? cache[group.id] : undefined;
@@ -688,8 +765,7 @@ async function handleUsageStoreRequest(store, request) {
 }
 
 async function usageStoreRequest(env, refresh = false, limit = 20) {
-	const store = env.CONFIG_STORE.get(env.CONFIG_STORE.idFromName('app-config-v1'));
-	const response = await store.fetch('https://config.internal/usage?limit=' + limit, { method: refresh ? 'POST' : 'GET' });
+	const response = await stateRequest(env, '/usage?limit=' + limit, { method: refresh ? 'POST' : 'GET' });
 	if (!response.ok) throw new Error('Usage cache unavailable');
 	return response.json();
 }
@@ -714,7 +790,7 @@ function buildUsageSummary(accounts, cacheMap) {
 // ----------------------------------------------------
 // Cloudflare GraphQL 用量分析查询
 // ----------------------------------------------------
-async function queryGraphQL(accountId, apiToken, startDateTime) {
+async function queryGraphQL(accountId, apiToken, startDateTime, networkFetch = fetch) {
 	const query = `
 		query GetAIUsage($accountId: String!, $start: String!) {
 			viewer {
@@ -736,7 +812,7 @@ async function queryGraphQL(accountId, apiToken, startDateTime) {
 			}
 		}
 	`;
-	const response = await fetch(`https://api.cloudflare.com/client/v4/graphql`, {
+	const response = await networkFetch(`https://api.cloudflare.com/client/v4/graphql`, {
 		method: 'POST',
 		redirect: 'manual',
 		signal: AbortSignal.timeout(15000),
@@ -860,12 +936,16 @@ async function handleV1Proxy(request, env, ctx) {
 			};
 		});
 		const upstreamAccounts = await getAccounts(env);
+		const listedModelIds = new Set(modelsData.map(entry => entry.id));
 		for (const account of upstreamAccounts) {
 			const provider = getAccountProvider(account);
 			if (account.status !== 'active' || !['openai', 'anthropic', 'gemini'].includes(provider)) continue;
 			for (const model of account.models || []) {
 				for (const id of [model, `${provider}:${model}`]) {
-					if (!modelsData.some(entry => entry.id === id)) modelsData.push({ id, object: 'model', created: 1700000000, owned_by: provider });
+					if (!listedModelIds.has(id)) {
+						listedModelIds.add(id);
+						modelsData.push({ id, object: 'model', created: 1700000000, owned_by: provider });
+					}
 				}
 			}
 		}
@@ -873,7 +953,8 @@ async function handleV1Proxy(request, env, ctx) {
 		if (typeof getAntigravityModelList === 'function') {
 			const agModels = await getAntigravityModelList(env, customMap);
 			for (const ag of agModels) {
-				if (!modelsData.some(m => m.id === ag.id)) {
+				if (!listedModelIds.has(ag.id)) {
+					listedModelIds.add(ag.id);
 					modelsData.push(ag);
 				}
 			}
@@ -957,7 +1038,7 @@ async function callOpenAICompatibleAPI(cfPayload, env, stream, clientSignal) {
 				body = openAIToGeminiRequest(payload);
 			} else return { success: false, status: 400, error: 'Unsupported upstream protocol for this operation.' };
 			requestStarted = true;
-			const response = await fetchUpstream(url, { headers, body: JSON.stringify(body), signal: clientSignal });
+			const response = await fetchUpstream(url, { headers, body: JSON.stringify(body), signal: clientSignal }, {}, runtimeFetch(env));
 			if (!response.ok) {
 				failure = await upstreamFailure(response, account);
 				if (!shouldRetryUpstream(response.status)) return failure;
@@ -1350,16 +1431,21 @@ function upstreamEndpoint(account, provider, operation) {
 	return `${base}/${operation}`;
 }
 
-async function fetchUpstream(url, options = {}, { headerTimeoutMs = 120000, bodyIdleTimeoutMs = 120000, maxResponseBytes = 32 * 1024 * 1024 } = {}) {
+async function fetchUpstream(url, options = {}, { headerTimeoutMs = 120000, bodyIdleTimeoutMs = 120000, maxResponseBytes = 32 * 1024 * 1024 } = {}, networkFetch = fetch) {
 	const abort = new AbortController(), clientSignal = options.signal;
 	let timer, closed = false, reader, output, rejectInterrupted, received = 0;
 	const interrupted = new Promise((_, reject) => { rejectInterrupted = reject; });
 	function cleanup() { clearTimeout(timer); clientSignal?.removeEventListener('abort', onClientAbort); }
+	function cancelReader(reason) {
+		if (!reader) return;
+		try { Promise.resolve(reader.cancel(reason)).catch(() => {}); }
+		catch (_) { /* Transport cancellation is best effort. */ }
+	}
 	function fail(error) {
 		if (closed) return;
 		closed = true; cleanup(); abort.abort(error); rejectInterrupted(error);
 		output?.error(error);
-		if (reader) void reader.cancel(error).catch(() => {});
+		cancelReader(error);
 	}
 	function onClientAbort() { fail(new Error('Client cancelled the request.')); }
 	function arm(milliseconds) { clearTimeout(timer); timer = setTimeout(() => fail(new Error('Upstream response timed out.')), milliseconds); timer?.unref?.(); }
@@ -1369,7 +1455,7 @@ async function fetchUpstream(url, options = {}, { headerTimeoutMs = 120000, body
 	if (clientSignal?.aborted) { onClientAbort(); throw abort.signal.reason; }
 	arm(headerTimeoutMs);
 	try {
-		const pending = fetch(url, { method: 'POST', ...options, redirect: 'manual', signal: abort.signal }).then(response => {
+		const pending = networkFetch(url, { method: 'POST', ...options, redirect: 'manual', signal: abort.signal }).then(response => {
 			if (closed) { void response.body?.cancel().catch(() => {}); throw abort.signal.reason; }
 			return response;
 		});
@@ -1389,7 +1475,13 @@ async function fetchUpstream(url, options = {}, { headerTimeoutMs = 120000, body
 					arm(bodyIdleTimeoutMs); controller.enqueue(value);
 				} catch (_) { fail(new Error('Upstream response body failed.')); }
 			},
-			cancel(reason) { if (closed) return; closed = true; cleanup(); abort.abort(reason); return reader.cancel(reason); }
+			cancel(reason) {
+				if (closed) return;
+				closed = true; cleanup(); abort.abort(reason);
+				// Stop consuming locally even when the transport never acknowledges
+				// cancellation. The signal still propagates; billing may continue.
+				cancelReader(reason);
+			}
 		});
 		return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 	} catch (error) { cleanup(); if (!closed) { closed = true; abort.abort(error); } throw error; }
@@ -1613,8 +1705,6 @@ async function handleCompletions(request, env, pathname, parsedBody) {
 			headers: {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive',
-				'Transfer-Encoding': 'chunked',
 			},
 		});
 	} else {
@@ -2102,8 +2192,6 @@ async function handleMessages(request, env) {
 			headers: {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive',
-				'Transfer-Encoding': 'chunked',
 			},
 		});
 	} else {
@@ -2457,7 +2545,7 @@ async function handleEmbeddings(request, env, parsedBody) {
     url = upstreamEndpoint(account, 'gemini', 'models/' + encodeURIComponent(name) + ':batchEmbedContents'); headers['x-goog-api-key'] = account.apiToken;
     payload = { requests: texts.map(text => ({ model: 'models/' + name, content: { parts: [{ text }] }, ...(Object.keys(embeddingOptions).length ? { embedContentConfig: embeddingOptions } : {}) })) };
    }
-   const response = await fetchUpstream(url, { headers, body: JSON.stringify(payload), signal: request.signal });
+   const response = await fetchUpstream(url, { headers, body: JSON.stringify(payload), signal: request.signal }, {}, runtimeFetch(env));
    if (!response.ok) { failure = await upstreamFailure(response, account); if (!shouldRetryUpstream(response.status)) break; continue; }
    const data = await response.json(); let embeddings, usage;
    if (isUpstreamErrorEnvelope(data)) return Response.json({ error: { message: cleanUpstreamError(upstreamErrorMessage(data), account), type: 'server_error' } }, { status: 502 });
@@ -2848,6 +2936,9 @@ function isThinkingModel(model) {
 // 运行时内存缓存（单 Worker 实例内复用）
 const antigravityTokenCache = new Map();
 const antigravityTokenRefreshes = new Map();
+// Injected transports own a request's cancellation and fetch budget. An in-flight
+// refresh must not make another request depend on that transport's lifetime.
+const antigravityRuntimeTokenRefreshes = new WeakMap();
 const antigravitySignatureCache = new Map();
 const antigravityProjectCache = new Map();
 // Public installed-app client used by Antigravity/CLIProxyAPI; this is not a user credential.
@@ -2990,9 +3081,16 @@ async function antigravityTokenCacheKey(account, env) {
 async function getAntigravityToken(account, env, { forceRefresh = false } = {}) {
 	if (!account.refreshToken && typeof account.apiKey === 'string' && account.apiKey.trim()) return account.apiKey.trim();
 	const cacheKey = await antigravityTokenCacheKey(account, env);
+	const network = env[GATEWAY_RUNTIME]?.fetch;
+	let refreshes = antigravityTokenRefreshes;
+	if (typeof network === 'function') {
+		refreshes = antigravityRuntimeTokenRefreshes.get(network);
+		if (!refreshes) { refreshes = new Map(); antigravityRuntimeTokenRefreshes.set(network, refreshes); }
+	}
 	// A forced refresh bypasses completed cache entries, but joins a refresh
-	// already running for the same credential and OAuth client fingerprint.
-	if (antigravityTokenRefreshes.has(cacheKey)) return antigravityTokenRefreshes.get(cacheKey);
+	// for the same credentials within this transport's cancellation/budget scope.
+	// Native Cloudflare requests retain the existing isolate-wide single flight.
+	if (refreshes.has(cacheKey)) return refreshes.get(cacheKey);
 	const cached = antigravityTokenCache.get(cacheKey);
 	if (!forceRefresh && cached && cached.expiresAt > Date.now()) {
 		return cached.token;
@@ -3002,34 +3100,69 @@ async function getAntigravityToken(account, env, { forceRefresh = false } = {}) 
 		throw new Error(`Account ${account.accountId} has neither refreshToken nor apiKey`);
 	}
 	const refresh = refreshAntigravityToken(account, env, cacheKey);
-	antigravityTokenRefreshes.set(cacheKey, refresh);
+	refreshes.set(cacheKey, refresh);
 	try { return await refresh; }
-	finally { if (antigravityTokenRefreshes.get(cacheKey) === refresh) antigravityTokenRefreshes.delete(cacheKey); }
+	finally { if (refreshes.get(cacheKey) === refresh) refreshes.delete(cacheKey); }
+}
+
+// Control responses have a small byte budget and one deadline covering headers
+// and the entire body. Native shared refreshes do not inherit a single caller's
+// signal; injected transports use their request-scoped signal explicitly.
+async function fetchAntigravityControlJson(url, options, env, label) {
+	const controller = new AbortController();
+	const signals = [AbortSignal.timeout(20000), env[GATEWAY_RUNTIME]?.signal].filter(Boolean);
+	const onAbort = () => controller.abort(new Error('Antigravity control request cancelled or timed out.'));
+	for (const signal of signals) {
+		signal.addEventListener('abort', onAbort, { once: true });
+		if (signal.aborted) onAbort();
+	}
+	try {
+		let response;
+		try {
+			response = await fetchUpstream(url, { ...options, signal: controller.signal }, {
+				headerTimeoutMs: 20000, bodyIdleTimeoutMs: 20000, maxResponseBytes: 1024 * 1024,
+			}, runtimeFetch(env));
+		} catch (error) {
+			// Transport errors can carry request diagnostics. Never reflect them to
+			// management or inference callers, including OAuth client credentials.
+			const safe = new Error(`${label} request failed or timed out.`);
+			if (error?.code === 'request_cancelled') safe.code = 'request_cancelled';
+			throw safe;
+		}
+		if (!response.ok) {
+			void response.body?.cancel().catch(() => {});
+			return { ok: false, status: response.status };
+		}
+		let data;
+		try { data = await response.json(); }
+		catch (_) { throw new Error(`${label} returned invalid JSON or exceeded the response limit.`); }
+		if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error(`${label} returned invalid JSON.`);
+		return { ok: true, status: response.status, data };
+	} finally {
+		for (const signal of signals) signal.removeEventListener('abort', onAbort);
+	}
 }
 
 async function refreshAntigravityToken(account, env, cacheKey) {
 	const { id: clientId, secret: clientSecret } = antigravityOAuthClient(account, env);
 
-	const resp = await fetch('https://oauth2.googleapis.com/token', {
+	const resp = await fetchAntigravityControlJson('https://oauth2.googleapis.com/token', {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
 		redirect: 'manual',
-		signal: AbortSignal.timeout(20000),
 		body: new URLSearchParams({
 			client_id: clientId,
 			client_secret: clientSecret,
 			refresh_token: account.refreshToken,
 			grant_type: 'refresh_token'
 		})
-	});
+	}, env, 'Google OAuth');
 
 	if (!resp.ok) {
-		await resp.body?.cancel();
 		throw new Error(`Google OAuth token refresh failed (${resp.status}); check the refresh token and matching OAuth client.`);
 	}
 
-	let data;
-	try { data = await resp.json(); } catch (_) { throw new Error('Google OAuth returned invalid JSON.'); }
+	const data = resp.data;
 	const token = data.access_token;
 	const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : 3600;
 	if (typeof token !== 'string' || !token || !Number.isFinite(expiresIn) || expiresIn <= 0) throw new Error('Google OAuth returned an invalid access token or expiry.');
@@ -3066,21 +3199,19 @@ async function discoverAntigravityProject(account, env, initialToken) {
 	let token = initialToken || await getAntigravityToken(account, env), refreshed = false;
 	async function control(action, body) {
 		for (;;) {
-			const response = await fetch('https://daily-cloudcode-pa.googleapis.com/v1internal:' + action, {
-				method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(20000),
+			const response = await fetchAntigravityControlJson('https://daily-cloudcode-pa.googleapis.com/v1internal:' + action, {
+				method: 'POST', redirect: 'manual',
 				headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'User-Agent': 'antigravity/1.11.5 worker/unknown' },
 				body: JSON.stringify(body)
-			});
+			}, env, 'Antigravity project discovery');
 			if (response.status === 401 && account.refreshToken && !refreshed) {
-				await response.body?.cancel(); refreshed = true;
+				refreshed = true;
 				token = await getAntigravityToken(account, env, { forceRefresh: true }); continue;
 			}
 			if (!response.ok) {
-				await response.body?.cancel();
 				throw Object.assign(new Error(`Antigravity ${action} failed (HTTP ${response.status}); check account authorization or supply an authorized project ID.`), { status: response.status === 401 || response.status === 403 ? response.status : 502 });
 			}
-			let data;
-			try { data = await response.json(); } catch (_) { throw new Error('Antigravity project discovery returned invalid JSON.'); }
+			const data = response.data;
 			if (data.error) throw Object.assign(new Error('Antigravity project discovery returned an error; verify this account in Antigravity.'), { status: 502 });
 			return data;
 		}
@@ -3393,7 +3524,7 @@ async function callAntigravityUpstream(anthropicRequest, env, stream, clientSign
 						'Client-Metadata': JSON.stringify({ ideType: 'IDE_UNSPECIFIED', platform: 'PLATFORM_UNSPECIFIED', pluginType: 'GEMINI' })
 					};
 					if (getModelFamily(actualModel) === 'claude' && isThinkingModel(actualModel)) headers['anthropic-beta'] = 'interleaved-thinking-2025-05-14';
-					const response = await fetchUpstream(url, { headers, body: JSON.stringify(payload), signal: clientSignal });
+					const response = await fetchUpstream(url, { headers, body: JSON.stringify(payload), signal: clientSignal }, {}, runtimeFetch(env));
 					if (response.ok) {
 						const contentType = response.headers.get('content-type') || '';
 						if ((stream || isThinkingModel(actualModel)) && contentType && !contentType.includes('text/event-stream')) {
@@ -3763,8 +3894,6 @@ async function handleAntigravityMessages(anthropicBody, env, targetModel, client
 			headers: {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive',
-				'Transfer-Encoding': 'chunked'
 			}
 		});
 	} else {
@@ -3808,8 +3937,6 @@ async function handleAntigravityCompletions(openaiBody, env, targetModel, isLega
 			headers: {
 				'Content-Type': 'text/event-stream',
 				'Cache-Control': 'no-cache',
-				'Connection': 'keep-alive',
-				'Transfer-Encoding': 'chunked'
 			}
 		});
 	} else {
@@ -3931,13 +4058,13 @@ async function handleDashboardApi(request, env, ctx) {
 		return new Response(JSON.stringify({ error: 'Setup is handled via environment variable ADMIN_PASSWORD' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 	}
 
-	// Login attempts and revocable sessions share the authoritative Durable Object.
+	// Login attempts and revocable sessions share the selected authoritative store.
 	if (url.pathname === '/api/auth/login' && method === 'POST') {
 		if (request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) return Response.json({ error: 'Origin not allowed' }, { status: 403 });
 		let payload;
 		try { payload = await readRequestJson(request, LOGIN_JSON_LIMIT); } catch (error) { return requestJsonErrorResponse(request, error); }
 		if (typeof payload?.password !== 'string' || payload.password.length > 4096) return Response.json({ error: 'Invalid login payload' }, { status: 400 });
-		const ipKey = await sha256('admin-login:' + (request.headers.get('CF-Connecting-IP') || 'local'));
+		const ipKey = await sha256('admin-login:' + (env[GATEWAY_RUNTIME]?.clientIp ?? (request.headers.get('CF-Connecting-IP') || 'local')));
 		const result = await adminSessionRequest(env, { type: 'login', password: payload.password, ipKey }, request);
 		if (result.limited) return Response.json({ error: 'Too many login attempts. Please try again later.' }, { status: 429, headers: { 'Retry-After': String(result.retryAfter), 'Cache-Control': 'no-store' } });
 		if (!result.success) return Response.json({ error: 'Incorrect password' }, { status: 401, headers: { 'Cache-Control': 'no-store' } });
@@ -4038,16 +4165,22 @@ async function handleDashboardApi(request, env, ctx) {
 				const headers = provider === 'gemini' ? { 'x-goog-api-key': account.apiToken }
 					: provider === 'anthropic' ? { 'x-api-key': account.apiToken, 'anthropic-version': '2023-06-01' }
 					: { Authorization: `Bearer ${account.apiToken}` };
-				const response = await fetch(target.href, { headers, redirect: 'manual', signal: AbortSignal.timeout(15000) });
-				await response.body?.cancel();
+				const response = await fetchUpstream(target.href, { method: 'GET', headers, signal: request.signal }, {
+					headerTimeoutMs: 15000, bodyIdleTimeoutMs: 15000, maxResponseBytes: 1024 * 1024
+				}, runtimeFetch(env));
+				void response.body?.cancel().catch(() => {});
 				return Response.json({ success: response.ok, provider, status: response.status, ...(response.ok ? { message: '模型目录连接成功，未发送生成请求。' } : { error: `Upstream model listing returned HTTP ${response.status}` }) });
 			} catch (error) { return Response.json({ success: false, provider, error: 'Unable to connect to the upstream model listing: ' + cleanUpstreamError(error.message, account) }); }
 		}
 		const targetAccountId = account.accountId;
 		const targetApiToken = account.apiToken;
+		if (env[GATEWAY_RUNTIME]?.hasFetchBudget?.(3) === false) {
+			return Response.json({ success: false, code: 'platform_subrequest_limit',
+				error: 'The platform request budget cannot complete this connection test. No upstream probes were sent.' }, { status: 503 });
+		}
 		const fetchConnectionTest = (target, options) => fetchUpstream(target, { ...options, signal: request.signal }, {
 			headerTimeoutMs: 15000, bodyIdleTimeoutMs: 15000, maxResponseBytes: 1024 * 1024
-		});
+		}, runtimeFetch(env));
 
 		const [readResult, editResult, analyticsResult] = await Promise.all([
 			// 1. Workers AI > Read
@@ -4263,7 +4396,7 @@ function gatewayChartRuntime() {
 			canvas.width = Math.round(width * scale); canvas.height = Math.round(height * scale); canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
 			ctx.setTransform(scale, 0, 0, scale, 0, 0); ctx.clearRect(0, 0, width, height);
 			const dataset = config.data.datasets[0] || {}, values = (dataset.data || []).map(value => Number.isFinite(Number(value)) ? Math.max(0, Number(value)) : 0);
-			const light = document.documentElement.getAttribute('data-theme') === 'light', textColor = light ? '#626263' : '#b2b2b3';
+			const light = document.documentElement.getAttribute('data-theme') === 'light', textColor = light ? '#57606a' : '#8b949e';
 			if (config.type === 'doughnut') {
 				const total = values.reduce((sum, value) => sum + value, 0), radius = Math.max(1, Math.min(width, height) * 0.42), stroke = radius * 0.3;
 				let angle = -Math.PI / 2;
@@ -4272,7 +4405,7 @@ function gatewayChartRuntime() {
 					if (!value || !total) return;
 					const next = angle + value / total * Math.PI * 2;
 					ctx.beginPath(); ctx.arc(width / 2, height / 2, radius - stroke / 2, angle, next);
-					ctx.strokeStyle = dataset.backgroundColor?.[index % dataset.backgroundColor.length] || '#97bddf'; ctx.stroke(); angle = next;
+					ctx.strokeStyle = dataset.backgroundColor?.[index % dataset.backgroundColor.length] || '#2f81f7'; ctx.stroke(); angle = next;
 				});
 				ctx.fillStyle = textColor; ctx.font = '600 16px system-ui'; ctx.textAlign = 'center'; ctx.fillText(Math.ceil(total).toLocaleString(), width / 2, height / 2 + 5);
 			} else {
@@ -4281,11 +4414,11 @@ function gatewayChartRuntime() {
 				ctx.font = '12px system-ui'; ctx.fillStyle = textColor; ctx.textAlign = 'right';
 				for (let i = 0; i <= 4; i++) {
 					const y = top + plotHeight * i / 4;
-					ctx.strokeStyle = light ? '#e2eaf2' : '#0a2440'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke();
+					ctx.strokeStyle = light ? '#d8dee4' : '#21262d'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(width - right, y); ctx.stroke();
 					ctx.fillText(Math.round(max * (1 - i / 4)).toLocaleString(), left - 7, y + 4);
 				}
 				ctx.beginPath(); values.forEach((value, i) => { const x = left + plotWidth * i / Math.max(1, values.length - 1), y = top + plotHeight * (1 - value / max); if (!i) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
-				ctx.strokeStyle = dataset.borderColor || '#97bddf'; ctx.lineWidth = 2.5; ctx.stroke();
+				ctx.strokeStyle = dataset.borderColor || '#2f81f7'; ctx.lineWidth = 2.5; ctx.stroke();
 				(config.data.labels || []).forEach((label, i, labels) => { if (i % Math.max(1, Math.ceil(labels.length / 7))) return; const x = left + plotWidth * i / Math.max(1, labels.length - 1); ctx.textAlign = i === 0 ? 'left' : i === labels.length - 1 ? 'right' : 'center'; ctx.fillText(String(label).slice(-5), x, height - 8); });
 			}
 		}
@@ -4311,6 +4444,79 @@ function secureHtmlResponse(html) {
 }
 
 // 1. 首页 / 登录页
+const DAY_NIGHT_SWITCH_SCRIPT = `
+(function() {
+  const REF_CSS = "* { margin: 0; padding: 0; transition: 0.7s; -webkit-tap-highlight-color:rgba(0,0,0,0); } .container { position: absolute;top: 50%;left: 50%;margin-top: -35em;margin-left: -90em;width: 180em; height: 70em; display: inline-block; vertical-align: bottom; transform: translate3d(0, 0, 0); } .components{ position:fixed; width: 180em; height: 70em; background-color: rgba(70, 133, 192,1); border-radius: 100em; box-shadow: inset 0 0 5em 3em rgba(0, 0, 0, 0.5); overflow: hidden; transition: 0.7s; transition-timing-function: cubic-bezier( 0,0.5, 1,1); cursor: pointer; } .main-button{ margin: 7.5em 0 0 7.5em; width: 55em; height:55em; background-color: rgba(255, 195, 35,1); border-radius: 50%; box-shadow:3em 3em 5em rgba(0, 0, 0, 0.5), inset -3em -5em 3em -3em rgba(0, 0, 0, 0.5), inset 4em 5em 2em -2em rgba(255, 230, 80,1); transition: 1.0s; transition-timing-function: cubic-bezier(0.56, 1.35, 0.52, 1.00); } .moon{ position: absolute; background-color: rgba(150, 160, 180, 1); box-shadow:inset 0em 0em 1em 1em rgba(0, 0, 0, 0.3) ; border-radius: 50%; transition: 0.5s; opacity: 0; } .moon:nth-child(1){ top: 7.5em; left: 25em; width: 12.5em; height: 12.5em; } .moon:nth-child(2){ top: 20em; left: 7.5em; width: 20em; height: 20em; } .moon:nth-child(3){ top: 32.5em; left: 32.5em; width: 12.5em; height: 12.5em; } .daytime-background { position: absolute; border-radius: 50%; transition: 1.0s; transition-timing-function: cubic-bezier(0.56, 1.35, 0.52, 1.00); } .daytime-background:nth-child(2){ top: -20em; left: -20em; width: 110em; height:110em; background-color: rgba(255, 255, 255,0.2); z-index: -2; } .daytime-background:nth-child(3){ top: -32.5em; left: -17.5em; width: 135em; height:135em; background-color: rgba(255, 255, 255,0.1); z-index: -3; } .daytime-background:nth-child(4){ top: -45em; left: -15em; width: 160em; height:160em; background-color: rgba(255, 255, 255,0.05); z-index: -4; } .cloud,.cloud-light{ transform: translateY(10em); transition: 1.0s; transition-timing-function: cubic-bezier(0.56, 1.35, 0.52, 1.00); } .cloud-son{ position: absolute; background-color: #fff; border-radius: 50%; z-index: -1; transition: transform 6s,right 1s,bottom 1s; } .cloud-son:nth-child(6n+1){ right: -20em; bottom: 10em; width: 50em; height: 50em; } .cloud-son:nth-child(6n+2) { right: -10em; bottom: -25em; width: 60em; height: 60em; } .cloud-son:nth-child(6n+3) { right: 20em; bottom: -40em; width: 60em; height: 60em; } .cloud-son:nth-child(6n+4) { right: 50em; bottom: -35em; width: 60em; height: 60em; } .cloud-son:nth-child(6n+5) { right: 75em; bottom: -60em; width: 75em; height: 75em; } .cloud-son:nth-child(6n+6) { right: 110em; bottom: -50em; width: 60em; height: 60em; } .cloud{ z-index: -2; } .cloud-light{ position: absolute; right: 0em; bottom: 25em; opacity: 0.5; z-index: -3; } .stars{ transform: translateY(-125em); z-index: -2; transition: 1.0s; transition-timing-function: cubic-bezier(0.56, 1.35, 0.52, 1.00); } .big { --size: 7.5em; } .medium { --size: 5em; } .small { --size: 3em; } .star { position: absolute; width: calc(2*var(--size)); height: calc(2*var(--size)); } .star:nth-child(1){ top: 11em; left: 39em; } .star:nth-child(2){ top: 39em; left: 91em; } .star:nth-child(3){ top: 26em; left: 19em; } .star:nth-child(4){ top: 37em; left: 66em; } .star:nth-child(5){ top: 21em; left: 75em; } .star:nth-child(6){ top: 51em; left: 38em; } .star-son{ float: left; width: var(--size); height: var(--size); background-image: radial-gradient(circle var(--size) at var(--pos, left 0), transparent var(--size), #fff); } .star-son:nth-child(1) { --pos: left 0; } .star-son:nth-child(2) { --pos: right 0; } .star-son:nth-child(3) { --pos: 0 bottom; } .star-son:nth-child(4) { --pos: right bottom; }";
+  const EXTRA_CSS = ".dn-plane, .dn-bear { position: absolute; left: 0; top: 0; z-index: -1; opacity: 0; pointer-events: none; transition: opacity 0.8s ease; } .dn-plane svg, .dn-bear svg { display: block; } .dn-plane svg { width: 24em; height: 14.5em; } .dn-bear svg { width: 30em; height: 30em; } .is-day .dn-plane { opacity: 0.95; } .is-night .dn-bear { opacity: 0.95; } .dn-plane { animation: dn-plane-fly 9.5s linear infinite; } .dn-bear { animation: dn-bear-float 17s linear infinite; } @keyframes dn-plane-fly { 0% { transform: translate(-28em, 14em) rotate(-4deg); } 35% { transform: translate(70em, 9em) rotate(2deg); } 70% { transform: translate(150em, 15em) rotate(-2deg); } 100% { transform: translate(196em, 10em) rotate(4deg); } } @keyframes dn-bear-float { 0% { transform: translate(-30em, 34em) rotate(-10deg); } 30% { transform: translate(50em, 27em) rotate(6deg); } 55% { transform: translate(112em, 33em) rotate(-6deg); } 80% { transform: translate(160em, 26em) rotate(8deg); } 100% { transform: translate(200em, 32em) rotate(-10deg); } } @media (prefers-reduced-motion: reduce) { .dn-plane, .dn-bear { animation: none !important; opacity: 0 !important; } }";
+  const REF_HTML = '<div class="components"><div class="main-button"><div class="moon"></div><div class="moon"></div><div class="moon"></div></div><div class="daytime-background"></div><div class="daytime-background"></div><div class="daytime-background"></div><div class="cloud"><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div></div><div class="cloud-light"><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div><div class="cloud-son"></div></div><div class="stars"><div class="star big"><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div></div><div class="star medium"><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div></div><div class="star small"><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div><div class="star-son"></div></div></div></div>';
+  const EXTRA_HTML = '<div class="dn-plane" aria-hidden="true"><svg viewBox="0 0 30 18"><path d="M30 9 L1 0.5 L11 9 Z" fill="#fff"/><path d="M30 9 L11 9 L1 17.5 Z" fill="rgba(0,0,0,0.16)"/></svg></div><div class="dn-bear" aria-hidden="true"><svg viewBox="-20 -20 40 40"><rect x="-9" y="2" width="18" height="14" rx="5" fill="#b9c4d4"/><ellipse cx="0" cy="9" rx="7.5" ry="8" fill="#e6ecf5"/><circle cx="0" cy="-1.5" r="8" fill="#a8845c"/><circle cx="0" cy="-1" r="13.5" fill="rgba(255,255,255,0.16)" stroke="#fff" stroke-width="1.6"/></svg></div>';
+
+  window.DayNightSwitch = {
+    mount(target, opts) {
+      if (!target) return null;
+      target.innerHTML = '';
+      const host = document.createElement('div');
+      host.className = 'dn-host';
+      host.style.cssText = 'position:relative;width:90px;height:35px;cursor:pointer;user-select:none;display:inline-block;';
+      const shadow = host.attachShadow({ mode: 'closed' });
+      const container = document.createElement('div');
+      container.className = 'container';
+      container.style.cssText = 'font-size:1px;transform:scale(0.5);transform-origin:center;position:absolute;top:50%;left:50%;margin-top:-35em;margin-left:-90em;width:180em;height:70em;';
+      container.innerHTML = REF_HTML;
+      const comp = container.querySelector('.components');
+      if (comp) comp.insertAdjacentHTML('beforeend', EXTRA_HTML);
+      const style = document.createElement('style');
+      style.textContent = REF_CSS + EXTRA_CSS;
+      shadow.appendChild(style);
+      shadow.appendChild(container);
+      target.appendChild(host);
+
+      function apply(dark) {
+        container.classList.remove('is-day', 'is-night');
+        container.classList.add(dark ? 'is-night' : 'is-day');
+        const knob = shadow.querySelector('.main-button');
+        const bgs = Array.from(shadow.querySelectorAll('.daytime-background'));
+        const cloud = shadow.querySelector('.cloud');
+        const cloudLight = shadow.querySelector('.cloud-light');
+        const track = shadow.querySelector('.components');
+        const moons = Array.from(shadow.querySelectorAll('.moon'));
+        const stars = shadow.querySelector('.stars');
+        if (dark) {
+          if (knob) { knob.style.transform = 'translateX(110em)'; knob.style.backgroundColor = 'rgba(195, 200, 210, 1)'; }
+          if (bgs[0]) bgs[0].style.transform = 'translateX(110em)';
+          if (bgs[1]) bgs[1].style.transform = 'translateX(80em)';
+          if (bgs[2]) bgs[2].style.transform = 'translateX(50em)';
+          if (cloud) cloud.style.transform = 'translateY(80em)';
+          if (cloudLight) cloudLight.style.transform = 'translateY(80em)';
+          if (track) track.style.backgroundColor = 'rgba(25, 30, 50, 1)';
+          moons.forEach(m => { m.style.opacity = '1'; });
+          if (stars) { stars.style.transform = 'translateY(-62.5em)'; stars.style.opacity = '1'; }
+        } else {
+          if (knob) { knob.style.transform = 'translateX(0)'; knob.style.backgroundColor = 'rgba(255, 195, 35, 1)'; }
+          bgs.forEach(b => { b.style.transform = 'translateX(0)'; });
+          if (cloud) cloud.style.transform = 'translateY(10em)';
+          if (cloudLight) cloudLight.style.transform = 'translateY(10em)';
+          if (track) track.style.backgroundColor = 'rgba(70, 133, 192, 1)';
+          moons.forEach(m => { m.style.opacity = '0'; });
+          if (stars) { stars.style.transform = 'translateY(-125em)'; stars.style.opacity = '0'; }
+        }
+      }
+
+      host.addEventListener('click', () => {
+        const nextDark = !opts.isDark();
+        document.documentElement.classList.add('dn-color-shift');
+        setTimeout(() => document.documentElement.classList.remove('dn-color-shift'), 500);
+        apply(nextDark);
+        opts.onToggle(nextDark);
+      });
+
+      apply(opts.isDark());
+      return { apply };
+    }
+  };
+})();
+`;
+
 async function handleLandingPage(request, env, ctx) {
 	const isLoggedIn = await verifyAdminCookie(request, env);
 
@@ -4345,238 +4551,218 @@ async function handleLandingPage(request, env, ctx) {
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>${PROJECT_DISPLAY_NAME}</title>
 	<link rel="icon" href="${PROJECT_ICON_DATA_URI}">
-	<script>${gatewayChartRuntime.toString()}; gatewayChartRuntime();</script>
+	<script>${gatewayChartRuntime.toString()}; gatewayChartRuntime();
+${DAY_NIGHT_SWITCH_SCRIPT}</script>
 	<style>
 		:root {
 			color-scheme: dark;
-			--bg-color: #1a1a1c;
-			--card-bg: #0C5CAB;
-			--border-color: #0C5CAB;
-			--text-main: #ebebeb;
-			--text-muted: #a7a7a8;
-			--primary-gradient: #0C5CAB;
-			--primary-bg: #0C5CAB;
-			--primary-hover: #0C5CAB;
-			--accent-color: #0C5CAB;
-			--accent-soft: #0C5CAB;
-			--primary-text: #fafafa;
-			--input-bg: #1d1d1f;
-			--input-border: #0C5CAB;
-			--input-text: #ebebeb;
-			--btn-secondary-bg: #0C5CAB;
-			--btn-secondary-hover: #0C5CAB;
-			--btn-secondary-text: #ebebeb;
-			--modal-overlay-bg: rgba(9,9,11,.78);
-			--card-shadow: inset 0 1px 0 rgba(12,92,171,.045), 0 10px 28px rgba(9,9,11,.2);
-			--surface-fill: linear-gradient(180deg, rgba(12,92,171,.025), transparent 65%), var(--card-bg);
-			--brand-top: #0C5CAB;
-			--brand-bottom: #0C5CAB;
+			--bg-color: #0d1117;
+			--sidebar-bg: #010409;
+			--card-bg: #161b22;
+			--section-item-bg: #0d1117;
+			--table-header-bg: #161b22;
+			--code-bg: #161b22;
+			--border-color: #30363d;
+			--border-muted: #21262d;
+			--text-main: #f0f6fc;
+			--text-muted: #8b949e;
+			--primary-gradient: #1f6feb;
+			--primary-bg: #1f6feb;
+			--primary-hover: #388bfd;
+			--accent-color: #2f81f7;
+			--accent-contrast: #ffffff;
+			--accent-soft: rgba(56, 139, 253, 0.15);
+			--primary-text: #ffffff;
+			--success-color: #3fb950;
+			--warning-color: #d29922;
+			--danger-color: #f85149;
+			--input-bg: #0d1117;
+			--input-border: #30363d;
+			--input-text: #f0f6fc;
+			--btn-secondary-bg: #21262d;
+			--btn-secondary-hover: #30363d;
+			--btn-secondary-text: #f0f6fc;
+			--modal-overlay-bg: rgba(1, 4, 9, 0.75);
+			--card-shadow: 0 0 transparent;
+			--surface-fill: var(--card-bg);
+			--brand-top: #1f6feb;
+			--brand-bottom: #0969da;
+			--code-color: #f0f6fc;
+			--code-border: #30363d;
 		}
 		:root[data-theme="light"] {
 			color-scheme: light;
-			--bg-color: #f2f2f2;
-			--card-bg: #fafafa;
-			--border-color: #dfdfdf;
-			--text-main: #0C5CAB;
-			--text-muted: #0C5CAB;
-			--primary-gradient: #0C5CAB;
-			--primary-bg: #0C5CAB;
-			--primary-hover: #0C5CAB;
-			--accent-color: #0C5CAB;
-			--accent-soft: #ededee;
-			--primary-text: #fafafa;
-			--input-bg: #f6f6f6;
-			--input-border: #d2d2d3;
-			--input-text: #0C5CAB;
-			--btn-secondary-bg: #f5f5f5;
-			--btn-secondary-hover: #ececed;
-			--btn-secondary-text: #0C5CAB;
-			--modal-overlay-bg: rgba(9,9,11,.45);
-			--card-shadow: inset 0 1px 0 #fafafa, 0 8px 24px rgba(12,92,171,.055);
-			--surface-fill: linear-gradient(180deg, #fafafa, #f8f8f8);
-			--brand-top: #ececec;
-			--brand-bottom: #e4e4e4;
+			--bg-color: #f6f8fa;
+			--sidebar-bg: #f6f8fa;
+			--card-bg: #ffffff;
+			--section-item-bg: #f6f8fa;
+			--table-header-bg: #f6f8fa;
+			--code-bg: #f6f8fa;
+			--border-color: #d0d7de;
+			--border-muted: #d8dee4;
+			--text-main: #1f2328;
+			--text-muted: #57606a;
+			--primary-gradient: #0969da;
+			--primary-bg: #0969da;
+			--primary-hover: #0860ca;
+			--accent-color: #0969da;
+			--accent-contrast: #ffffff;
+			--accent-soft: #ddf4ff;
+			--primary-text: #ffffff;
+			--success-color: #1a7f37;
+			--warning-color: #9a6700;
+			--danger-color: #cf222e;
+			--input-bg: #ffffff;
+			--input-border: #d0d7de;
+			--input-text: #1f2328;
+			--btn-secondary-bg: #f6f8fa;
+			--btn-secondary-hover: #f3f4f6;
+			--btn-secondary-text: #1f2328;
+			--modal-overlay-bg: rgba(27, 31, 36, 0.5);
+			--card-shadow: 0 1px 0 rgba(31, 35, 40, 0.04);
+			--surface-fill: var(--card-bg);
+			--brand-top: #0969da;
+			--brand-bottom: #0860ca;
+			--code-color: #1f2328;
+			--code-border: #d0d7de;
 		}
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		body {
-			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 			background: var(--bg-color); color: var(--text-main);
 			min-height: 100vh; min-height: 100dvh;
 			display: flex; flex-direction: column; align-items: center;
-			padding: 0 40px; overflow-x: hidden;
+			padding: 0 32px; overflow-x: hidden;
 			-webkit-font-smoothing: antialiased;
 		}
 		h1, h2, h3, button, input { font-family: inherit; }
 		button, a, input { -webkit-tap-highlight-color: transparent; }
-		button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 4px; }
+		button:focus-visible, a:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 		.hidden { display: none !important; }
 		.site-header {
-			width: 100%; max-width: 1080px; min-height: 92px;
+			width: 100%; max-width: 1120px; min-height: 68px;
 			display: flex; align-items: center; justify-content: space-between; gap: 20px;
 			border-bottom: 1px solid var(--border-color);
 		}
 		.brand { display: flex; align-items: center; gap: 12px; }
 		.logo-icon {
-			width: 36px; height: 36px; border-radius: 8px;
-			background: linear-gradient(145deg, var(--brand-top), var(--brand-bottom)); border: 1px solid var(--input-border); box-shadow: inset 0 1px 0 rgba(250,250,250,.09), 0 3px 7px rgba(9,9,11,.12);
+			width: 32px; height: 32px; border-radius: 6px;
+			background: var(--primary-bg); border: 1px solid rgba(240,246,252,.15);
 			display: flex; align-items: center; justify-content: center;
-			font-family: Consolas, monospace; font-size: 16px; font-weight: 700; color: var(--accent-color);
+			font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 14px; font-weight: 600; color: #ffffff;
 		}
-		.logo-text { font-size: 16px; font-weight: 650; letter-spacing: -.5px; }
-		.brand-tag { color: var(--text-muted); font-size: 12px; letter-spacing: 1.6px; font-weight: 600; margin-top: 2px; }
-		.action-btn-group { display: flex; align-items: center; gap: 10px; }
+		.logo-text { font-size: 16px; font-weight: 600; letter-spacing: -.2px; }
+		.brand-tag { color: var(--text-muted); font-size: 12px; font-weight: 500; margin-top: 2px; }
+		.action-btn-group { display: flex; align-items: center; gap: 8px; }
 		.floating-btn {
-			background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-muted);
-			width: 38px; height: 38px; border-radius: 8px;
+			background: var(--btn-secondary-bg); border: 1px solid var(--border-color); color: var(--btn-secondary-text);
+			width: 32px; height: 32px; border-radius: 6px;
 			display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
-			transition: background .15s, color .15s, border-color .15s;
+			box-shadow: var(--card-shadow);
+			transition: background .1s, color .1s, border-color .1s;
 		}
 		.floating-btn:hover { color: var(--text-main); background: var(--btn-secondary-hover); border-color: var(--input-border); }
-		.floating-btn.primary-action { background: var(--primary-bg); color: var(--primary-text); border-color: transparent; width: auto; padding: 0 13px; gap: 8px; }
-		.action-label { font-size: 12px; font-weight: 600; }
+		.floating-btn.primary-action { background: var(--primary-bg); color: var(--primary-text); border-color: rgba(240,246,252,.15); width: auto; height: 32px; padding: 0 12px; gap: 6px; }
+		.action-label { font-size: 13px; font-weight: 500; }
 		.project-title { margin: 0; line-height: 1; }
-		.project-title .project-brand-wordmark { font-size: 32px; }
-		.project-title .project-brand-icon { width: 48px; height: 48px; }
-		.dashboard-container { max-width: 1080px; width: 100%; display: flex; flex-direction: column; gap: 24px; flex: 1; padding: 32px 0 48px; }
-		.hero { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; padding: 0 0 4px; }
-		.eyebrow { display: flex; align-items: center; gap: 8px; color: var(--accent-color); font: 600 11px/1.5 Consolas, monospace; letter-spacing: 1.8px; margin-bottom: 20px; }
+		.project-title .project-brand-wordmark { font-size: 20px; }
+		.project-title .project-brand-icon { width: 36px; height: 36px; }
+		.dashboard-container { max-width: 1120px; width: 100%; display: flex; flex-direction: column; gap: 20px; flex: 1; padding: 28px 0 48px; }
+		.hero {
+			display: flex; flex-direction: column; align-items: flex-start; gap: 16px;
+			padding: 20px 24px; background: var(--card-bg); border: 1px solid var(--border-color);
+			border-radius: 6px; box-shadow: var(--card-shadow);
+		}
+		.eyebrow { display: flex; align-items: center; gap: 8px; color: var(--accent-color); font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; margin-bottom: 12px; }
 		.eyebrow::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-		.hero-description { color: var(--text-muted); font-size: 14px; line-height: 1.9; margin: 0; }
-		.endpoint-list { display: flex; flex-wrap: wrap; gap: 24px; padding-bottom: 4px; }
-		.endpoint-label { font-size: 12px; font-weight: 600; letter-spacing: .6px; color: var(--text-muted); margin-bottom: 6px; }
-		.endpoint-list code { display: inline-block; font: 12px/1.6 Consolas, monospace; background: var(--accent-soft); border: 1px solid var(--border-color); border-radius: 4px; padding: 6px 10px; color: var(--accent-color); box-shadow: inset 0 1px 0 rgba(12,92,171,.04); }
-		.dashboard-grid { display: grid; grid-template-columns: .9fr 1.3fr; gap: 20px; width: 100%; }
+		.hero-description { color: var(--text-muted); font-size: 14px; line-height: 1.6; margin: 0; }
+		.endpoint-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; width: 100%; padding-top: 4px; }
+		.endpoint-list > div { background: var(--section-item-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; }
+		.endpoint-label { font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--text-muted); margin-bottom: 6px; }
+		.endpoint-list code { display: inline-block; font: 500 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--accent-soft); border: 1px solid rgba(56,139,253,.35); border-radius: 6px; padding: 3px 8px; color: var(--accent-color); }
+		.dashboard-grid { display: grid; grid-template-columns: .9fr 1.3fr; gap: 16px; width: 100%; }
 		.dashboard-grid.single-col { grid-template-columns: 1fr; }
-		.stat-card, .section-card { background: var(--surface-fill); border: 1px solid var(--border-color); border-radius: 8px; padding: 26px; box-shadow: var(--card-shadow); min-width: 0; }
-		.stat-card { display: flex; flex-direction: column; gap: 20px; overflow: hidden; }
-		.stat-title { font-size: 12px; line-height: 1.6; color: var(--text-muted); font-weight: 500; }
-		.stat-value { font-size: 32px; line-height: 1.4; font-weight: 600; font-family: Consolas, 'SFMono-Regular', monospace; font-variant-numeric: tabular-nums; letter-spacing: -1.5px; color: var(--text-main); }
-		.stat-unit { color: var(--text-muted); font: 12px Consolas, monospace; margin-left: 6px; }
-		.progress-container { width: 100%; height: 5px; background: var(--btn-secondary-bg); border-radius: 4px; overflow: hidden; }
-		.progress-bar { height: 100%; background: var(--accent-color); border-radius: 4px; width: 0; transition: width .35s ease; }
+		.stat-card, .section-card { background: var(--surface-fill); border: 1px solid var(--border-color); border-radius: 6px; padding: 20px 24px; box-shadow: var(--card-shadow); min-width: 0; }
+		.stat-card { display: flex; flex-direction: column; gap: 16px; overflow: hidden; }
+		.stat-title { font-size: 12px; line-height: 1.5; color: var(--text-muted); font-weight: 600; }
+		.stat-value { font-size: 28px; line-height: 1.3; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; color: var(--text-main); }
+		.stat-unit { color: var(--text-muted); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; margin-left: 6px; }
+		.progress-container { width: 100%; height: 8px; background: var(--btn-secondary-bg); border-radius: 9999px; overflow: hidden; border: 1px solid var(--border-muted); }
+		.progress-bar { height: 100%; background: var(--accent-color); border-radius: 9999px; width: 0; transition: width .35s ease; }
 		.public-chart-wrapper { position: relative; height: 190px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 28px; overflow: hidden; }
 		.public-chart-wrapper canvas { max-width: 100% !important; }
 		#public-chart-legend { scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
-		.section-card { display: flex; flex-direction: column; gap: 20px; }
+		.section-card { display: flex; flex-direction: column; gap: 16px; }
 		.section-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-		.form-group { display: flex; flex-direction: column; gap: 8px; }
-		.form-group label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
-		input { width: 100%; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--input-text); padding: 12px 13px; border-radius: 8px; outline: none; font-size: 14px; transition: border-color .15s, box-shadow .15s; }
-		input::placeholder { color: var(--text-muted); opacity: .7; }
+		.form-group { display: flex; flex-direction: column; gap: 6px; }
+		.form-group label { font-size: 12px; font-weight: 600; color: var(--text-main); }
+		input { width: 100%; height: 32px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--input-text); padding: 5px 12px; border-radius: 6px; outline: none; font-size: 14px; transition: border-color .1s, box-shadow .1s; }
+		input::placeholder { color: var(--text-muted); opacity: .75; }
 		input:focus { border-color: var(--accent-color); box-shadow: 0 0 0 3px var(--accent-soft); }
-		.btn { display: inline-flex; align-items: center; justify-content: center; padding: 11px 18px; border-radius: 8px; font-weight: 600; font-size: 12px; cursor: pointer; border: 1px solid transparent; text-decoration: none; transition: background .15s, opacity .15s; }
-		.btn-primary { background: var(--primary-bg); color: var(--primary-text); box-shadow: inset 0 1px 0 rgba(250,250,250,.15), 0 3px 8px rgba(9,9,11,.18); }
+		.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 5px 12px; border-radius: 6px; font-weight: 500; font-size: 14px; line-height: 20px; cursor: pointer; border: 1px solid transparent; text-decoration: none; transition: background .1s, border-color .1s; }
+		.btn-primary { background: var(--primary-bg); color: var(--primary-text); border-color: rgba(240,246,252,.15); box-shadow: var(--card-shadow); }
 		.btn-primary:hover, .floating-btn.primary-action:hover { background: var(--primary-hover); opacity: 1; }
-		.btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-text); border-color: var(--border-color); }
+		.btn-secondary { background: var(--btn-secondary-bg); color: var(--btn-secondary-text); border-color: var(--border-color); box-shadow: var(--card-shadow); }
 		.btn-secondary:hover { background: var(--btn-secondary-hover); }
 		.modal-overlay { position: fixed; inset: 0; background: var(--modal-overlay-bg); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; pointer-events: none; padding: 20px; transition: opacity .15s ease; }
 		.modal-overlay.active { opacity: 1; visibility: visible; pointer-events: auto; }
-		.modal-card { background: var(--surface-fill); border: 1px solid var(--border-color); border-radius: 8px; width: 100%; max-width: 420px; padding: 28px; box-shadow: 0 20px 60px rgba(9,9,11,.22); display: flex; flex-direction: column; gap: 20px; max-height: calc(100dvh - 40px); overflow-y: auto; }
-		.modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); }
-		.modal-header h3 { font-size: 24px; font-weight: 600; }
-		.modal-description { font-size: 12px; line-height: 1.8; color: var(--text-muted); }
-		.close-btn { width: 44px; height: 44px; border-radius: 4px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+		.modal-card { background: var(--surface-fill); border: 1px solid var(--border-color); border-radius: 8px; width: 100%; max-width: 420px; padding: 24px; box-shadow: 0 16px 32px rgba(1,4,9,.45); display: flex; flex-direction: column; gap: 16px; max-height: calc(100dvh - 40px); overflow-y: auto; }
+		.modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border-color); }
+		.modal-header h3 { font-size: 16px; font-weight: 600; }
+		.modal-description { font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+		.close-btn { width: 28px; height: 28px; border-radius: 6px; background: transparent; border: none; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; }
 		.close-btn:hover { color: var(--text-main); background: var(--btn-secondary-bg); }
 		.toast-container { position: fixed; top: 24px; right: 24px; display: flex; flex-direction: column; gap: 10px; z-index: 9999; pointer-events: none; max-width: calc(100vw - 32px); }
-		.toast { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); min-width: 260px; padding: 14px 18px; border-radius: 8px; box-shadow: 0 8px 24px rgba(9,9,11,.16); font-size: 12px; line-height: 1.5; font-weight: 500; display: flex; align-items: center; gap: 10px; opacity: 0; transition: opacity .15s; pointer-events: auto; }
+		.toast { background: var(--card-bg); border: 1px solid var(--border-color); color: var(--text-main); min-width: 260px; padding: 12px 16px; border-radius: 6px; box-shadow: 0 8px 24px rgba(1,4,9,.28); font-size: 13px; line-height: 1.5; font-weight: 500; display: flex; align-items: center; gap: 10px; opacity: 0; transition: opacity .15s; pointer-events: auto; }
 		.toast.show { opacity: 1; }
 		.toast-icon { width: 18px; height: 18px; flex-shrink: 0; }
-		.toast-success { background: #10b981; color: #fafafa; border-color: #10b981; }
-		.toast-error { background: #ef4444; color: #fafafa; border-color: #ef4444; }
-		.toast-warning { background: #f59e0b; color: #fafafa; border-color: #f59e0b; }
-		.page-footer { width: 100%; max-width: 1080px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 22px 0; border-top: 1px solid var(--border-color); font-size: 12px; line-height: 1.6; color: var(--text-muted); }
-		.page-footer a { color: var(--text-muted); text-decoration: none; }
-		.page-footer a:hover { color: var(--text-main); }
+		.toast-success { border-left: 3px solid var(--success-color); }
+		.toast-error { border-left: 3px solid var(--danger-color); }
+		.toast-warning { border-left: 3px solid var(--warning-color); }
+		.page-footer { width: 100%; max-width: 1120px; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 0; border-top: 1px solid var(--border-color); font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+		.page-footer a { color: var(--accent-color); text-decoration: none; }
+		.page-footer a:hover { text-decoration: underline; }
 		@keyframes spin { to { transform: rotate(360deg); } }
 		.spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--border-color); border-radius: 50%; border-top-color: var(--accent-color); animation: spin .8s linear infinite; }
 		@media (max-width: 768px) {
-			body { padding: 0 22px; }
-			.site-header { min-height: 78px; }
-			.dashboard-container { padding: 24px 0 32px; gap: 20px; }
-			.hero { flex-direction: column; align-items: flex-start; gap: 24px; padding-bottom: 4px; }
-			.eyebrow { margin-bottom: 16px; }
-			.endpoint-list { flex-direction: row; flex-wrap: wrap; gap: 14px; }
-			.endpoint-list code { font-size: 12px; }
+			body { padding: 0 20px; }
+			.site-header { min-height: 64px; }
+			.dashboard-container { padding: 20px 0 32px; gap: 16px; }
+			.hero { padding: 16px; gap: 14px; }
+			.endpoint-list { grid-template-columns: 1fr; gap: 10px; }
 			.dashboard-grid { grid-template-columns: 1fr; gap: 16px; }
-			.stat-card, .section-card { padding: 22px; }
+			.stat-card, .section-card { padding: 18px; }
 			.public-chart-wrapper { gap: 24px !important; }
 			.public-chart-wrapper > div:first-child { width: 150px !important; height: 150px !important; }
-			.page-footer { flex-wrap: wrap; gap: 5px; padding: 20px 0; }
+			.page-footer { flex-wrap: wrap; gap: 5px; padding: 16px 0; }
 		}
 		@media (max-width: 480px) {
-			body { padding: 0 18px; }
+			body { padding: 0 16px; }
 			.logo-text { font-size: 14px; }
-			.brand-tag { font-size: 12px; letter-spacing: 1.2px; }
+			.brand-tag { font-size: 12px; }
 			.brand { gap: 9px; }
 			.action-btn-group { gap: 7px; }
 			.action-label { display: none; }
-			.floating-btn.primary-action { width: 38px; padding: 0; }
-			.project-title .project-brand-wordmark { font-size: 22px; }
-			.project-title .project-brand-icon { width: 36px; height: 36px; }
-			.hero-description { font-size: 12px; }
+			.floating-btn.primary-action { width: 32px; padding: 0; }
+			.project-title .project-brand-wordmark { font-size: 18px; }
+			.project-title .project-brand-icon { width: 32px; height: 32px; }
+			.hero-description { font-size: 13px; }
 			.public-chart-wrapper { flex-direction: column !important; height: auto !important; gap: 20px !important; padding-top: 4px; }
 			.public-chart-wrapper > div:nth-child(2) { width: 100% !important; height: auto !important; }
 			#public-chart-legend { max-height: 180px !important; width: 100%; }
-			.modal-card { padding: 22px; }
+			.modal-card { padding: 20px; }
 			.toast-container { top: 16px; right: 16px; left: 16px; }
 			.toast { min-width: 0; width: 100%; }
 		}
 		@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
-
-        /* Enterprise 品牌表面；自包含页面继续离线可读，不引入 CDN 资源。 */
-        :root {
-          --bg-color: #09090b; --sidebar-bg: #09090b; --card-bg: #161618;
-          --border-color: rgba(250,250,250,.12); --text-main: #fafafa; --text-muted: #b2b2b3;
-          --primary-gradient: #0C5CAB; --primary-bg: #0C5CAB; --primary-hover: #0a4a8a; --primary-text: #fafafa;
-          --accent-color: #97bddf; --accent-contrast: #09090b; --accent-soft: rgba(12,92,171,.22);
-          --success-color: #10b981; --warning-color: #f59e0b; --danger-color: #ef4444;
-          --input-bg: #09090b; --input-border: rgba(250,250,250,.24); --input-text: #fafafa;
-          --btn-secondary-bg: #222224; --btn-secondary-hover: #303032; --btn-secondary-text: #fafafa;
-          --modal-overlay-bg: rgba(9,9,11,.72); --surface-fill: var(--card-bg); --card-shadow: none;
-          --brand-top: #0C5CAB; --brand-bottom: #0a4a8a; --sidebar-menu-hover: #1c1c1e;
-          --table-header-bg: #222224; --section-item-bg: #1c1c1e; --code-bg: #222224; --code-color: #fafafa; --code-border: rgba(250,250,250,.12);
-        }
-        :root[data-theme="light"] {
-          --bg-color: #fafafa; --sidebar-bg: #eeeeef; --card-bg: #eeeeef; --text-main: #09090b; --text-muted: #626263;
-          --border-color: rgba(9,9,11,.12); --accent-color: #0C5CAB; --accent-soft: rgba(12,92,171,.10);
-          --input-bg: #fafafa; --input-border: rgba(9,9,11,.24); --input-text: #09090b;
-          --btn-secondary-bg: #e2e2e3; --btn-secondary-hover: #d3d3d4; --btn-secondary-text: #09090b;
-          --surface-fill: var(--card-bg); --sidebar-menu-hover: #e2e2e3; --table-header-bg: #e2e2e3;
-          --section-item-bg: #fafafa; --code-bg: #fafafa; --code-color: #09090b; --code-border: rgba(9,9,11,.12);
-        }
-        body { font-family: 'IBM Plex Sans', 'Microsoft YaHei', system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
-        .hero h1, .page-title, h1 { font-size: 32px; line-height: 1.25; letter-spacing: -.02em; }
-        h2, .section-title { font-size: 24px; line-height: 1.3; } h3 { font-size: 20px; }
-        .hero-description { font-size: 16px; } .eyebrow, .brand-tag, .endpoint-label { font-size: 12px; }
-        .logo-icon { background: #0C5CAB; color: #fafafa; border: 0; border-radius: 4px; box-shadow: none; }
-        .stat-card, .section-card, .error-card, .modal-content { border: 0; border-radius: 8px; background: var(--card-bg); box-shadow: none; }
-        .btn, .floating-btn, .nav-item, .badge, .endpoint-list code, input, select, textarea { border-radius: 4px; }
-        .btn, .floating-btn, .nav-item { border-color: transparent; box-shadow: none; }
-        .stat-title { font-size: 16px; font-weight: 500; } #view-title { font-size: 32px; } .stat-card > div:first-child > svg { display: none; }
-        .stat-value { font-size: 32px; font-variant-numeric: tabular-nums; }
-        .site-header, .sidebar, .page-footer { border-color: transparent; }
-        .error-icon { background: var(--accent-soft); border: 0; border-radius: 4px; box-shadow: none; }
-        .error-card .btn { background: #0C5CAB; color: #fafafa; }
-        @media(max-width:680px) { .hero h1, .page-title, h1 { font-size: 32px; } .hero { gap: 24px; } }
-
-
-        :root[data-theme="light"] { --success-color: #087453; --warning-color: #875809; --danger-color: #b53132; }
-</style>
+	</style>
 </head>
 <body>
 
 	<header class="site-header">
 		<h1 class="project-title" aria-label="${PROJECT_DISPLAY_NAME}">${projectBrandMarkup()}</h1>
 	<div class="action-btn-group">
-		<button class="floating-btn" onclick="toggleTheme()" title="切换日间/夜间模式">
-			<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 20px; height: 20px;">
-				<circle cx="12" cy="12" r="4" />
-				<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-			</svg>
-			<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
-				<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-			</svg>
-		</button>
+		<div id="landing-theme-toggle" class="day-night-control" style="display:inline-flex;align-items:center;"></div>
 		<button class="floating-btn primary-action" onclick="openLoginModal()" aria-haspopup="dialog" aria-controls="login-modal" title="${isLoggedIn ? '管理后台' : '管理员登录'}">
 			${isLoggedIn ? `
 				<!-- User Check Icon -->
@@ -4719,14 +4905,28 @@ async function handleLandingPage(request, env, ctx) {
 			}, 3000);
 		}
 
+		let dnSwitchLanding = null;
 		function initTheme() {
-			const savedTheme = localStorage.getItem('theme');
-			if (savedTheme) {
-				document.documentElement.setAttribute('data-theme', savedTheme);
-			} else {
-				const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-				const defaultTheme = systemPrefersDark ? 'dark' : 'light';
-				document.documentElement.setAttribute('data-theme', defaultTheme);
+			const systemPrefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+			const defaultTheme = systemPrefersDark ? 'dark' : 'light';
+			document.documentElement.setAttribute('data-theme', defaultTheme);
+			window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+				const next = e.matches ? 'dark' : 'light';
+				document.documentElement.setAttribute('data-theme', next);
+				dnSwitchLanding?.apply(next === 'dark');
+				if (lastPublicSummaryData) renderPublicSummary(lastPublicSummaryData);
+			});
+			const container = document.getElementById('landing-theme-toggle');
+			if (container && window.DayNightSwitch && !dnSwitchLanding) {
+				dnSwitchLanding = window.DayNightSwitch.mount(container, {
+					isDark: () => document.documentElement.getAttribute('data-theme') === 'dark',
+					onToggle: (nextDark) => {
+						const nextTheme = nextDark ? 'dark' : 'light';
+						document.documentElement.setAttribute('data-theme', nextTheme);
+						localStorage.setItem('theme', nextTheme);
+						if (lastPublicSummaryData) renderPublicSummary(lastPublicSummaryData);
+					}
+				});
 			}
 			updateThemeIcons();
 		}
@@ -4860,8 +5060,8 @@ async function handleLandingPage(request, env, ctx) {
 				const chartData = sortedModelsToday.map(m => m.neurons);
 
 				const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-				const textColor = isLight ? '#626263' : '#b2b2b3';
-				const borderColor = isLight ? '#fafafa' : '#161618';
+				const textColor = isLight ? '#57606a' : '#8b949e';
+				const borderColor = isLight ? '#ffffff' : '#161b22';
 
 				const ctx = document.getElementById('publicModelsChart').getContext('2d');
 				if (publicModelsChartInstance) {
@@ -4877,7 +5077,7 @@ async function handleLandingPage(request, env, ctx) {
 						labels: labels,
 						datasets: [{
 							data: chartData,
-							backgroundColor: (isLight ? ['#0C5CAB', '#3c7bbb', '#6b9bcb', '#9bbada', '#0a4a8a', '#cad9e8'] : ['#97bddf', '#6b9bcb', '#3c7bbb', '#cad9e8', '#0C5CAB', '#e2eaf2']),
+							backgroundColor: (isLight ? ['#0969da', '#1a7f37', '#8250df', '#9a6700', '#218bff', '#54aeff'] : ['#2f81f7', '#3fb950', '#a371f7', '#d29922', '#388bfd', '#58a6ff']),
 							borderWidth: 2,
 							borderColor: borderColor
 						}]
@@ -4902,7 +5102,7 @@ async function handleLandingPage(request, env, ctx) {
 
 				// 动态且逐个淡入渲染模型说明 ID
 				if (legendContainer) {
-					const colors = (isLight ? ['#0C5CAB', '#3c7bbb', '#6b9bcb', '#9bbada', '#0a4a8a', '#cad9e8'] : ['#97bddf', '#6b9bcb', '#3c7bbb', '#cad9e8', '#0C5CAB', '#e2eaf2']);
+					const colors = (isLight ? ['#0969da', '#1a7f37', '#8250df', '#9a6700', '#218bff', '#54aeff'] : ['#2f81f7', '#3fb950', '#a371f7', '#d29922', '#388bfd', '#58a6ff']);
 					const total = chartData.reduce((a, b) => a + b, 0);
 
 					labels.forEach((label, index) => {
@@ -4995,88 +5195,91 @@ function handleAdminPage(request, env, ctx) {
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>控制台 · ${PROJECT_DISPLAY_NAME}</title>
 	<link rel="icon" href="${PROJECT_ICON_DATA_URI}">
-	<script>${gatewayChartRuntime.toString()}; gatewayChartRuntime();</script>
+	<script>${gatewayChartRuntime.toString()}; gatewayChartRuntime();
+${DAY_NIGHT_SWITCH_SCRIPT}</script>
 	<style>
 		:root {
 			color-scheme: dark;
-			--bg-color: #1a1a1c;
-			--sidebar-bg: #1f1f21;
-			--card-bg: #0C5CAB;
-			--border-color: #0C5CAB;
-			--text-main: #ebebeb;
-			--text-muted: #a7a7a8;
-			--accent-color: #0C5CAB;
-			--primary-bg: #0C5CAB;
-			--primary-hover: #0C5CAB;
-			--primary-text: #fafafa;
-			--accent-contrast: #18181a;
-			--accent-soft: rgba(12,92,171,0.10);
-			--primary-gradient: var(--accent-color);
-			--success-color: #10b981;
-			--warning-color: #f59e0b;
-			--danger-color: #ef4444;
-			--sidebar-width: 240px;
-			--sidebar-menu-hover: #0C5CAB;
-			--input-bg: #1f1f21;
-			--input-border: #0C5CAB;
-			--input-text: #ebebeb;
-			--table-header-bg: #0C5CAB;
-			--btn-secondary-bg: #0C5CAB;
-			--btn-secondary-hover: #0C5CAB;
-			--btn-secondary-text: #e0e0e0;
-			--modal-overlay-bg: rgba(9,9,11,0.78);
-			--section-item-bg: #212123;
-			--card-shadow: 0 2px 3px rgba(9,9,11,0.12), 0 12px 30px rgba(9,9,11,0.10), inset 0 1px 0 rgba(250,250,250,0.025);
-			--code-bg: #0C5CAB;
-			--code-color: #d2d2d3;
-			--code-border: #0C5CAB;
+			--bg-color: #0d1117;
+			--sidebar-bg: #010409;
+			--card-bg: #161b22;
+			--border-color: #30363d;
+			--border-muted: #21262d;
+			--text-main: #f0f6fc;
+			--text-muted: #8b949e;
+			--accent-color: #2f81f7;
+			--primary-bg: #1f6feb;
+			--primary-hover: #388bfd;
+			--primary-text: #ffffff;
+			--accent-contrast: #ffffff;
+			--accent-soft: rgba(56, 139, 253, 0.15);
+			--primary-gradient: #1f6feb;
+			--success-color: #3fb950;
+			--warning-color: #d29922;
+			--danger-color: #f85149;
+			--sidebar-width: 248px;
+			--sidebar-menu-hover: rgba(177, 186, 196, 0.12);
+			--input-bg: #0d1117;
+			--input-border: #30363d;
+			--input-text: #f0f6fc;
+			--table-header-bg: #161b22;
+			--btn-secondary-bg: #21262d;
+			--btn-secondary-hover: #30363d;
+			--btn-secondary-text: #f0f6fc;
+			--modal-overlay-bg: rgba(1, 4, 9, 0.75);
+			--section-item-bg: #0d1117;
+			--card-shadow: 0 0 transparent;
+			--code-bg: #0d1117;
+			--code-color: #f0f6fc;
+			--code-border: #30363d;
 		}
 		:root[data-theme="light"] {
 			color-scheme: light;
-			--bg-color: #f2f2f2;
-			--sidebar-bg: #fafafa;
-			--card-bg: #fafafa;
-			--border-color: #e1e1e1;
-			--text-main: #0C5CAB;
-			--text-muted: #0C5CAB;
-			--accent-color: #0C5CAB;
-			--primary-bg: #0C5CAB;
-			--primary-hover: #0C5CAB;
-			--primary-text: #fafafa;
-			--accent-contrast: #fafafa;
-			--accent-soft: #efefef;
-			--success-color: #10b981;
-			--warning-color: #f59e0b;
-			--danger-color: #ef4444;
-			--sidebar-menu-hover: #f1f1f1;
-			--input-bg: #fafafa;
-			--input-border: #d4d4d4;
-			--input-text: #0C5CAB;
-			--table-header-bg: #f3f3f3;
-			--btn-secondary-bg: #fafafa;
-			--btn-secondary-hover: #efefef;
-			--btn-secondary-text: #0C5CAB;
-			--modal-overlay-bg: rgba(9,9,11,0.35);
-			--section-item-bg: #f5f5f5;
-			--card-shadow: 0 2px 4px rgba(12,92,171,0.025), 0 10px 24px rgba(12,92,171,0.035), inset 0 1px 0 #fafafa;
-			--code-bg: #f1f1f1;
-			--code-color: #0C5CAB;
-			--code-border: #e3e3e3;
+			--bg-color: #ffffff;
+			--sidebar-bg: #f6f8fa;
+			--card-bg: #ffffff;
+			--border-color: #d0d7de;
+			--border-muted: #d8dee4;
+			--text-main: #1f2328;
+			--text-muted: #57606a;
+			--accent-color: #0969da;
+			--primary-bg: #0969da;
+			--primary-hover: #0860ca;
+			--primary-text: #ffffff;
+			--accent-contrast: #ffffff;
+			--accent-soft: #ddf4ff;
+			--success-color: #1a7f37;
+			--warning-color: #9a6700;
+			--danger-color: #cf222e;
+			--sidebar-menu-hover: rgba(208, 215, 222, 0.32);
+			--input-bg: #ffffff;
+			--input-border: #d0d7de;
+			--input-text: #1f2328;
+			--table-header-bg: #f6f8fa;
+			--btn-secondary-bg: #f6f8fa;
+			--btn-secondary-hover: #f3f4f6;
+			--btn-secondary-text: #1f2328;
+			--modal-overlay-bg: rgba(27, 31, 36, 0.5);
+			--section-item-bg: #f6f8fa;
+			--card-shadow: 0 1px 0 rgba(31, 35, 40, 0.04);
+			--code-bg: #f6f8fa;
+			--code-color: #1f2328;
+			--code-border: #d0d7de;
 		}
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		body {
-			font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 			background: var(--bg-color);
 			color: var(--text-main);
 			font-size: 14px;
-			line-height: 1.55;
+			line-height: 1.5;
 			min-height: 100vh;
 		}
 		button, input { font: inherit; }
 		button { touch-action: manipulation; }
 		button:focus-visible, input:focus-visible, [tabindex]:focus-visible {
 			outline: 2px solid var(--accent-color);
-			outline-offset: 3px;
+			outline-offset: 2px;
 		}
 		::selection { background: var(--accent-soft); color: var(--text-main); }
 		.hidden { display: none !important; }
@@ -5089,100 +5292,100 @@ function handleAdminPage(request, env, ctx) {
 			border-right: 1px solid var(--border-color);
 			display: flex;
 			flex-direction: column;
-			padding: 28px 16px 20px;
+			padding: 20px 12px 16px;
 			position: fixed;
 			inset: 0 auto 0 0;
 			z-index: 100;
 			overflow-y: auto;
 			transition: transform 180ms ease;
 		}
-		.logo-area { display: flex; align-items: center; gap: 10px; margin-bottom: 36px; padding: 0 8px; }
+		.logo-area { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; padding: 0 8px 16px; border-bottom: 1px solid var(--border-color); }
 		.logo-icon {
-			width: 32px; height: 32px; border-radius: 8px; flex-shrink: 0;
+			width: 32px; height: 32px; border-radius: 6px; flex-shrink: 0;
 			background: var(--primary-bg); color: var(--primary-text);
 			display: flex; align-items: center; justify-content: center;
-			font-size: 12px; font-weight: 800; letter-spacing: -0.5px;
+			font-size: 12px; font-weight: 600;
 		}
-		.logo-text { font-size: 16px; font-weight: 650; letter-spacing: -0.5px; color: var(--text-main); }
-		.workspace-caption { font-size: 12px; font-weight: 650; letter-spacing: 0.14em; color: var(--text-muted); padding: 0 12px; margin-bottom: 12px; }
-		.nav-menu { display: flex; flex-direction: column; gap: 5px; flex: 1; padding-bottom: 32px; }
+		.logo-text { font-size: 16px; font-weight: 600; color: var(--text-main); }
+		.workspace-caption { font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 0 10px; margin-bottom: 6px; }
+		.nav-menu { display: flex; flex-direction: column; gap: 2px; flex: 1; padding-bottom: 24px; }
 		.nav-item {
 			text-align: left; background: transparent; width: 100%;
-			display: flex; align-items: center; gap: 12px; padding: 11px 12px;
-			border: 1px solid transparent; border-radius: 4px; cursor: pointer;
-			font-size: 12px; font-weight: 500; color: var(--text-muted);
-			transition: color 150ms ease, background-color 150ms ease;
+			display: flex; align-items: center; gap: 10px; padding: 8px 10px;
+			border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+			font-size: 14px; font-weight: 400; color: var(--text-main);
+			transition: color 80ms linear, background-color 80ms linear;
 		}
-		.nav-item:hover { color: var(--text-main); background: var(--sidebar-menu-hover); }
-		.nav-item.active { color: var(--accent-color); background: var(--accent-soft); border-color: rgba(12,92,171,0.10); box-shadow: inset 2px 0 0 var(--accent-color); }
-		.nav-item svg { flex-shrink: 0; }
-		.aside-footer { display: flex; flex-direction: column; gap: 9px; border-top: 1px solid var(--border-color); padding-top: 18px; }
+		.nav-item:hover { background: var(--sidebar-menu-hover); }
+		.nav-item.active { font-weight: 600; background: var(--sidebar-menu-hover); box-shadow: inset 3px 0 0 var(--accent-color); }
+		.nav-item svg { flex-shrink: 0; color: var(--text-muted); }
+		.nav-item.active svg { color: var(--accent-color); }
+		.aside-footer { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border-color); padding-top: 16px; }
 		.sidebar-backdrop { display: none; }
-		main { flex: 1; min-width: 0; margin-left: var(--sidebar-width); padding: 38px 36px; }
+		main { flex: 1; min-width: 0; margin-left: var(--sidebar-width); padding: 28px 32px; }
 		#auth-views { max-width: 1440px; margin: 0 auto; }
-		header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 25px; border-bottom: 1px solid var(--border-color); }
-		#view-title { font-size: 24px; font-weight: 650; letter-spacing: -0.8px; line-height: 1.3; }
-		.header-eyebrow { color: var(--text-muted); font-size: 12px; letter-spacing: 0.15em; margin-bottom: 9px; font-weight: 650; }
+		header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
+		#view-title { font-size: 20px; font-weight: 600; line-height: 1.3; }
+		.header-eyebrow { color: var(--text-muted); font-size: 12px; letter-spacing: 0.04em; margin-bottom: 4px; font-weight: 600; }
 		.card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
-		.stat-card { box-shadow: var(--card-shadow); min-width: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 21px; display: flex; flex-direction: column; gap: 14px; }
-		.stat-title { font-size: 12px; color: var(--text-muted); font-weight: 500; }
-		.stat-value { font-size: 32px; line-height: 1.15; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
-		.stat-desc { font-size: 12px; color: var(--text-muted); line-height: 1.6; }
-		.progress-container { width: 100%; height: 5px; background: var(--sidebar-menu-hover); border-radius: 4px; overflow: hidden; }
-		.progress-bar { height: 100%; width: 0%; background: var(--accent-color); transition: width 300ms ease; }
-		.section-card { box-shadow: var(--card-shadow); min-width: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; margin-bottom: 22px; }
-		.section-note { margin-top: 6px; color: var(--text-muted); font-size: 12px; line-height: 1.7; }
-		.section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px; margin-bottom: 20px; }
-		.section-title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; letter-spacing: -0.2px; }
+		.stat-card { box-shadow: var(--card-shadow); min-width: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
+		.stat-title { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+		.stat-value { font-size: 28px; line-height: 1.2; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.5px; }
+		.stat-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+		.progress-container { width: 100%; height: 8px; background: var(--btn-secondary-bg); border-radius: 9999px; overflow: hidden; border: 1px solid var(--border-muted); }
+		.progress-bar { height: 100%; width: 0%; background: var(--accent-color); border-radius: 9999px; transition: width 300ms ease; }
+		.section-card { box-shadow: var(--card-shadow); min-width: 0; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 20px 24px; margin-bottom: 20px; }
+		.section-note { margin-top: 4px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+		.section-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-muted); }
+		.section-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
 		.access-endpoint-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
-		.access-endpoint-card { box-shadow: inset 0 1px 0 rgba(250,250,250,0.025); min-width: 0; text-align: left; padding: 18px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--section-item-bg); color: inherit; }
-		.endpoint-badge { display: inline-flex; color: var(--accent-color); background: var(--accent-soft); padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }
-		.endpoint-url { display: block; margin-top: 12px; font: 12px/1.65 ui-monospace, 'Cascadia Code', Consolas, monospace; word-break: break-all; color: var(--text-main); background: none; border: 0; text-align: left; text-decoration: none; cursor: pointer; }
+		.access-endpoint-card { min-width: 0; text-align: left; padding: 16px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--section-item-bg); color: inherit; }
+		.endpoint-badge { display: inline-flex; color: var(--accent-color); background: var(--accent-soft); border: 1px solid rgba(56,139,253,.35); padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+		.endpoint-url { display: block; margin-top: 10px; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; color: var(--text-main); background: none; border: 0; text-align: left; text-decoration: none; cursor: pointer; }
 		.endpoint-url:hover { color: var(--accent-color); text-decoration: underline; text-underline-offset: 4px; }
-		.endpoint-hint { margin-top: 10px; font-size: 12px; color: var(--text-muted); }
-		.form-group { min-width: 0; display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
-		.form-group label { font-size: 12px; font-weight: 500; color: var(--text-muted); }
-		input, select, textarea { min-width: 0; width: 100%; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--input-text); padding: 10px 12px; border-radius: 4px; outline: none; font: inherit; font-size: 12px; transition: border-color 150ms ease; }
-		input::placeholder { color: var(--text-muted); opacity: 0.65; }
-		input:focus, select:focus, textarea:focus { border-color: var(--accent-color); }
-		.btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 8px 13px; border: 1px solid transparent; border-radius: 4px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background-color 150ms ease, border-color 150ms ease; }
-		.btn-primary { background: var(--primary-bg); color: var(--primary-text); border-color: rgba(250,250,250,0.10); box-shadow: 0 2px 3px rgba(9,9,11,0.16), inset 0 1px 0 rgba(250,250,250,0.12); }
+		.endpoint-hint { margin-top: 8px; font-size: 12px; color: var(--text-muted); }
+		.form-group { min-width: 0; display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+		.form-group label { font-size: 12px; font-weight: 600; color: var(--text-main); }
+		input, select, textarea { min-width: 0; width: 100%; min-height: 32px; background: var(--input-bg); border: 1px solid var(--input-border); color: var(--input-text); padding: 5px 12px; border-radius: 6px; outline: none; font: inherit; font-size: 14px; transition: border-color 100ms ease, box-shadow 100ms ease; }
+		input::placeholder { color: var(--text-muted); opacity: 0.7; }
+		input:focus, select:focus, textarea:focus { border-color: var(--accent-color); box-shadow: 0 0 0 3px var(--accent-soft); }
+		.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 5px 12px; border: 1px solid transparent; border-radius: 6px; font-size: 14px; font-weight: 500; line-height: 20px; cursor: pointer; white-space: nowrap; transition: background-color 80ms linear, border-color 80ms linear; }
+		.btn-primary { background: var(--primary-bg); color: var(--primary-text); border-color: rgba(240,246,252,0.15); box-shadow: var(--card-shadow); }
 		.btn-primary:hover { background: var(--primary-hover); }
-		.btn-secondary { box-shadow: 0 1px 2px rgba(9,9,11,0.06), inset 0 1px 0 rgba(250,250,250,0.025); background: var(--btn-secondary-bg); color: var(--btn-secondary-text); border-color: var(--border-color); }
+		.btn-secondary { box-shadow: var(--card-shadow); background: var(--btn-secondary-bg); color: var(--btn-secondary-text); border-color: var(--border-color); }
 		.btn-secondary:hover { background: var(--btn-secondary-hover); border-color: var(--input-border); }
-		.btn-success { background: rgba(16,185,129,0.08); color: var(--success-color); border-color: var(--success-color); }
-		.btn-success:hover { background: var(--sidebar-menu-hover); }
-		.btn:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+		.btn-success { background: rgba(46,160,67,0.15); color: var(--success-color); border-color: rgba(46,160,67,0.4); }
+		.btn-success:hover { background: rgba(46,160,67,0.25); }
+		.btn:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
 		@keyframes spinner-border { to { transform: rotate(360deg); } }
 		.spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spinner-border 0.75s linear infinite; }
 		.card-update-flash { border-color: var(--accent-color) !important; }
-		.table-scroll { width: 100%; max-width: 100%; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; scrollbar-width: thin; scrollbar-color: var(--input-border) transparent; }
-		table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
-		th { background: var(--table-header-bg); color: var(--text-muted); padding: 12px 14px; border-bottom: 1px solid var(--border-color); font-weight: 500; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
-		td { padding: 13px 14px; border-bottom: 1px solid var(--border-color); color: var(--text-main); white-space: nowrap; }
+		.table-scroll { width: 100%; max-width: 100%; overflow: auto; border: 1px solid var(--border-color); border-radius: 6px; scrollbar-width: thin; scrollbar-color: var(--input-border) transparent; }
+		table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+		th { background: var(--table-header-bg); color: var(--text-muted); padding: 10px 14px; border-bottom: 1px solid var(--border-color); font-size: 12px; font-weight: 600; white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+		td { padding: 10px 14px; border-bottom: 1px solid var(--border-muted); color: var(--text-main); white-space: nowrap; }
 		tr:last-child td { border-bottom: 0; }
 		tr:hover td { background: var(--section-item-bg); }
-		code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; background: var(--code-bg); color: var(--code-color); padding: 3px 6px; border: 1px solid var(--code-border); border-radius: 4px; font-size: 12px; }
-		.badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 4px; font-size: 12px; font-weight: 500; white-space: nowrap; }
-		.badge-success { color: var(--success-color); background: rgba(16,185,129,0.10); }
-		.badge-warning { color: var(--warning-color); background: rgba(245,158,11,0.10); }
-		.badge-danger { color: var(--danger-color); background: rgba(239,68,68,0.10); }
-		.badge-info { color: #0C5CAB; background: rgba(12,92,171,0.10); }
-		:root[data-theme="light"] .badge-info { color: #0C5CAB; }
-		.charts-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 20px; }
-		.chart-container { position: relative; height: 280px; width: 100%; margin-top: 18px; }
+		code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--code-bg); color: var(--code-color); padding: 2px 6px; border: 1px solid var(--code-border); border-radius: 6px; font-size: 12px; }
+		.badge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; border: 1px solid transparent; white-space: nowrap; }
+		.badge-success { color: var(--success-color); background: rgba(46,160,67,0.15); border-color: rgba(46,160,67,0.4); }
+		.badge-warning { color: var(--warning-color); background: rgba(187,128,9,0.15); border-color: rgba(187,128,9,0.4); }
+		.badge-danger { color: var(--danger-color); background: rgba(248,81,73,0.15); border-color: rgba(248,81,73,0.4); }
+		.badge-info { color: var(--accent-color); background: var(--accent-soft); border-color: rgba(56,139,253,0.4); }
+		.charts-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; }
+		.chart-container { position: relative; height: 280px; width: 100%; margin-top: 16px; }
 		.public-chart-wrapper { display: flex; align-items: center; justify-content: center; min-width: 0; gap: 22px; }
 		.public-chart-wrapper canvas { max-width: 100% !important; }
 		#admin-chart-legend { scrollbar-width: thin; scrollbar-color: var(--input-border) transparent; }
 		.modal-overlay { position: fixed; inset: 0; padding: 16px; background: var(--modal-overlay-bg); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 150ms ease; }
 		.modal-overlay.active { opacity: 1; visibility: visible; pointer-events: auto; }
-		.modal-card { width: 100%; max-width: 500px; max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 26px; box-shadow: 0 24px 80px rgba(9,9,11,0.22); display: flex; flex-direction: column; gap: 16px; }
-		.modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 16px; }
-		.modal-header h3 { font-size: 24px; font-weight: 600; }
+		.modal-card { width: 100%; max-width: 500px; max-height: calc(100dvh - 32px); overflow-y: auto; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; padding: 24px; box-shadow: 0 16px 32px rgba(1,4,9,0.45); display: flex; flex-direction: column; gap: 16px; }
+		.modal-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 14px; }
+		.modal-header h3 { font-size: 16px; font-weight: 600; }
 		.modal-header button { min-width: 28px; min-height: 28px; display: grid; place-items: center; }
-		.modal-footer { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--border-color); padding-top: 18px; margin-top: 4px; }
+		.modal-footer { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; border-top: 1px solid var(--border-color); padding-top: 16px; margin-top: 4px; }
 		.toast-container { position: fixed; top: 22px; right: 22px; display: flex; flex-direction: column; gap: 10px; z-index: 9999; pointer-events: none; }
-		.toast { max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 24px rgba(9,9,11,0.15); font-size: 12px; display: flex; align-items: center; gap: 10px; opacity: 0; transform: translateY(-6px); transition: opacity 150ms ease, transform 150ms ease; pointer-events: auto; }
+		.toast { max-width: min(420px, calc(100vw - 32px)); padding: 12px 16px; background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 6px; box-shadow: 0 8px 24px rgba(1,4,9,0.28); font-size: 13px; display: flex; align-items: center; gap: 10px; opacity: 0; transform: translateY(-6px); transition: opacity 150ms ease, transform 150ms ease; pointer-events: auto; }
 		.toast.show { opacity: 1; transform: translateY(0); }
 		.toast-icon { width: 18px; height: 18px; flex-shrink: 0; }
 		.toast-success { border-left: 3px solid var(--success-color); }
@@ -5191,9 +5394,9 @@ function handleAdminPage(request, env, ctx) {
 		.toast-success .toast-icon { color: var(--success-color) !important; }
 		.toast-error .toast-icon { color: var(--danger-color) !important; }
 		.toast-warning .toast-icon { color: var(--warning-color) !important; }
-		.mapping-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 14px; padding: 18px; background: var(--section-item-bg); border: 1px solid var(--border-color); border-radius: 8px; margin-top: 16px; }
+		.mapping-form { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.5fr); gap: 14px; padding: 16px; background: var(--section-item-bg); border: 1px solid var(--border-color); border-radius: 6px; margin-top: 16px; }
 		.mapping-form-actions { grid-column: 1 / -1; display: flex; gap: 10px; }
-		.mapping-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 24px 0 12px; }
+		.mapping-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin: 20px 0 12px; }
 		.mapping-toolbar input { max-width: 340px; }
 		.mapping-count { font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 		.mapping-table-scroll { max-height: 580px; }
@@ -5242,46 +5445,7 @@ function handleAdminPage(request, env, ctx) {
 		@media (prefers-reduced-motion: reduce) {
 			*, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 		}
-
-        /* Enterprise 品牌表面；自包含页面继续离线可读，不引入 CDN 资源。 */
-        :root {
-          --bg-color: #09090b; --sidebar-bg: #09090b; --card-bg: #161618;
-          --border-color: rgba(250,250,250,.12); --text-main: #fafafa; --text-muted: #b2b2b3;
-          --primary-gradient: #0C5CAB; --primary-bg: #0C5CAB; --primary-hover: #0a4a8a; --primary-text: #fafafa;
-          --accent-color: #97bddf; --accent-contrast: #09090b; --accent-soft: rgba(12,92,171,.22);
-          --success-color: #10b981; --warning-color: #f59e0b; --danger-color: #ef4444;
-          --input-bg: #09090b; --input-border: rgba(250,250,250,.24); --input-text: #fafafa;
-          --btn-secondary-bg: #222224; --btn-secondary-hover: #303032; --btn-secondary-text: #fafafa;
-          --modal-overlay-bg: rgba(9,9,11,.72); --surface-fill: var(--card-bg); --card-shadow: none;
-          --brand-top: #0C5CAB; --brand-bottom: #0a4a8a; --sidebar-menu-hover: #1c1c1e;
-          --table-header-bg: #222224; --section-item-bg: #1c1c1e; --code-bg: #222224; --code-color: #fafafa; --code-border: rgba(250,250,250,.12);
-        }
-        :root[data-theme="light"] {
-          --bg-color: #fafafa; --sidebar-bg: #eeeeef; --card-bg: #eeeeef; --text-main: #09090b; --text-muted: #626263;
-          --border-color: rgba(9,9,11,.12); --accent-color: #0C5CAB; --accent-soft: rgba(12,92,171,.10);
-          --input-bg: #fafafa; --input-border: rgba(9,9,11,.24); --input-text: #09090b;
-          --btn-secondary-bg: #e2e2e3; --btn-secondary-hover: #d3d3d4; --btn-secondary-text: #09090b;
-          --surface-fill: var(--card-bg); --sidebar-menu-hover: #e2e2e3; --table-header-bg: #e2e2e3;
-          --section-item-bg: #fafafa; --code-bg: #fafafa; --code-color: #09090b; --code-border: rgba(9,9,11,.12);
-        }
-        body { font-family: 'IBM Plex Sans', 'Microsoft YaHei', system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
-        .hero h1, .page-title, h1 { font-size: 32px; line-height: 1.25; letter-spacing: -.02em; }
-        h2, .section-title { font-size: 24px; line-height: 1.3; } h3 { font-size: 20px; }
-        .hero-description { font-size: 16px; } .eyebrow, .brand-tag, .endpoint-label { font-size: 12px; }
-        .logo-icon { background: #0C5CAB; color: #fafafa; border: 0; border-radius: 4px; box-shadow: none; }
-        .stat-card, .section-card, .error-card, .modal-content { border: 0; border-radius: 8px; background: var(--card-bg); box-shadow: none; }
-        .btn, .floating-btn, .nav-item, .badge, .endpoint-list code, input, select, textarea { border-radius: 4px; }
-        .btn, .floating-btn, .nav-item { border-color: transparent; box-shadow: none; }
-        .stat-title { font-size: 16px; font-weight: 500; } #view-title { font-size: 32px; } .stat-card > div:first-child > svg { display: none; }
-        .stat-value { font-size: 32px; font-variant-numeric: tabular-nums; }
-        .site-header, .sidebar, .page-footer { border-color: transparent; }
-        .error-icon { background: var(--accent-soft); border: 0; border-radius: 4px; box-shadow: none; }
-        .error-card .btn { background: #0C5CAB; color: #fafafa; }
-        @media(max-width:680px) { .hero h1, .page-title, h1 { font-size: 32px; } .hero { gap: 24px; } }
-
-
-        :root[data-theme="light"] { --success-color: #087453; --warning-color: #875809; --danger-color: #b53132; }
-</style>
+	</style>
 </head>
 <body>
 	<!-- App Header for Mobile Toggle -->
@@ -5325,16 +5489,7 @@ function handleAdminPage(request, env, ctx) {
 			</div>
 
 			<div class="aside-footer">
-				<button class="btn btn-secondary" onclick="toggleTheme()" title="切换日间/夜间模式" style="width: 100%; display: flex; justify-content: center; gap: 8px; align-items: center;">
-					<svg class="theme-icon-sun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none; width: 18px; height: 18px;">
-						<circle cx="12" cy="12" r="4" />
-						<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41" />
-					</svg>
-					<svg class="theme-icon-moon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
-						<path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
-					</svg>
-					<span>切换主题</span>
-				</button>
+				<div id="admin-theme-toggle" class="day-night-control" style="display:flex;justify-content:center;margin-bottom:8px;"></div>
 				<button class="btn btn-secondary" onclick="logout()">退出登录</button>
 				<div style="text-align: center; font-size: 12px; color: var(--text-muted); opacity: 0.55; padding-top: 4px;">
 					基于 <a href="https://github.com/cmliussss2024/WorkersAI2API" target="_blank" rel="noopener" style="color: inherit; text-decoration: underline; text-underline-offset: 2px;">WorkersAI2API</a>
@@ -5972,14 +6127,28 @@ function handleAdminPage(request, env, ctx) {
 			label.innerText = '最后更新: ' + yyyy + '-' + MM + '-' + dd + ' ' + hh + ':' + mm + ':' + ss;
 		}
 
+		let dnSwitchAdmin = null;
 		function initTheme() {
-			const savedTheme = localStorage.getItem('theme');
-			if (savedTheme) {
-				document.documentElement.setAttribute('data-theme', savedTheme);
-			} else {
-				const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-				const defaultTheme = systemPrefersDark ? 'dark' : 'light';
-				document.documentElement.setAttribute('data-theme', defaultTheme);
+			const systemPrefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+			const defaultTheme = systemPrefersDark ? 'dark' : 'light';
+			document.documentElement.setAttribute('data-theme', defaultTheme);
+			window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+				const next = e.matches ? 'dark' : 'light';
+				document.documentElement.setAttribute('data-theme', next);
+				dnSwitchAdmin?.apply(next === 'dark');
+				if (currentTab === 'overview') loadUsageDetails();
+			});
+			const container = document.getElementById('admin-theme-toggle');
+			if (container && window.DayNightSwitch && !dnSwitchAdmin) {
+				dnSwitchAdmin = window.DayNightSwitch.mount(container, {
+					isDark: () => document.documentElement.getAttribute('data-theme') === 'dark',
+					onToggle: (nextDark) => {
+						const nextTheme = nextDark ? 'dark' : 'light';
+						document.documentElement.setAttribute('data-theme', nextTheme);
+						localStorage.setItem('theme', nextTheme);
+						if (currentTab === 'overview') loadUsageDetails();
+					}
+				});
 			}
 			updateThemeIcons();
 		}
@@ -6090,11 +6259,11 @@ function handleAdminPage(request, env, ctx) {
 		function renderHistoryChart(labels, data) {
 			if (historyChart) historyChart.destroy();
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-			const gridColor = isLight ? 'rgba(9,9,11,0.05)' : 'rgba(250,250,250,0.05)';
-			const textColor = isLight ? '#626263' : '#b2b2b3';
+			const gridColor = isLight ? '#d8dee4' : '#21262d';
+			const textColor = isLight ? '#57606a' : '#8b949e';
 			const ctx = document.getElementById('historyChart').getContext('2d');
-			const chartAccent = isLight ? '#0C5CAB' : '#97bddf';
-			const chartFill = isLight ? 'rgba(12,92,171,0.06)' : 'rgba(12,92,171,0.06)';
+			const chartAccent = isLight ? '#0969da' : '#2f81f7';
+			const chartFill = isLight ? 'rgba(9,105,218,0.08)' : 'rgba(47,129,247,0.12)';
 			historyChart = new Chart(ctx, {
 				type: 'line',
 				data: {
@@ -6159,8 +6328,8 @@ function handleAdminPage(request, env, ctx) {
 			const sortedData = combined.map(x => x.value);
 
 			const isLight = document.documentElement.getAttribute('data-theme') === 'light';
-			const textColor = isLight ? '#626263' : '#b2b2b3';
-			const borderColor = isLight ? '#fafafa' : '#161618';
+			const textColor = isLight ? '#57606a' : '#8b949e';
+			const borderColor = isLight ? '#ffffff' : '#161b22';
 			const ctx = document.getElementById('modelsChart').getContext('2d');
 
 			modelsChart = new Chart(ctx, {
@@ -6169,7 +6338,7 @@ function handleAdminPage(request, env, ctx) {
 					labels: sortedLabels,
 					datasets: [{
 						data: sortedData,
-						backgroundColor: ['#0C5CAB', '#0a4a8a', '#97bddf', '#538ec2', '#397db9', '#71a5d1'],
+						backgroundColor: ['#2f81f7', '#3fb950', '#a371f7', '#d29922', '#388bfd', '#58a6ff'],
 						borderWidth: 2,
 						borderColor: borderColor
 					}]
@@ -6194,7 +6363,7 @@ function handleAdminPage(request, env, ctx) {
 
 			// Render Custom HTML Legend for Admin Page
 			if (legendContainer) {
-				const colors = ['#0C5CAB', '#0a4a8a', '#97bddf', '#538ec2', '#397db9', '#71a5d1'];
+				const colors = ['#2f81f7', '#3fb950', '#a371f7', '#d29922', '#388bfd', '#58a6ff'];
 				const total = sortedData.reduce((a, b) => a + b, 0);
 
 				combined.forEach((itemData, index) => {
@@ -6807,16 +6976,17 @@ function handleKVError(request) {
 	<style>
 		:root {
 			color-scheme: dark;
-			--bg-color: #1a1a1c;
-			--card-bg: #0C5CAB;
-			--border-color: #0C5CAB;
-			--text-main: #ececed;
-			--text-muted: #b2b2b3;
-			--accent-color: #0C5CAB;
+			--bg-color: #010409;
+			--card-bg: #0d1117;
+			--border-color: #30363d;
+			--text-main: #f0f6fc;
+			--text-muted: #8b949e;
+			--accent-color: #2f81f7;
+			--accent-soft: rgba(56, 139, 253, 0.15);
 		}
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		body {
-			font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
 			background: var(--bg-color);
 			color: var(--text-main);
 			min-height: 100vh;
@@ -6829,75 +6999,36 @@ function handleKVError(request) {
 		.error-card {
 			width: 100%;
 			max-width: 600px;
-			padding: clamp(24px, 5vw, 40px);
+			padding: clamp(24px, 5vw, 36px);
 			background: var(--card-bg);
 			border: 1px solid var(--border-color);
-			border-radius: 8px;
-			box-shadow: 0 20px 48px rgba(9,9,11,0.28), inset 0 1px 0 rgba(250,250,250,0.045);
+			border-radius: 6px;
+			box-shadow: none;
 		}
 		.error-icon {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			width: 44px;
-			height: 44px;
-			margin-bottom: 24px;
-			border: 1px solid var(--border-color);
-			border-radius: 8px;
+			width: 40px;
+			height: 40px;
+			margin-bottom: 20px;
+			border: 1px solid rgba(56, 139, 253, 0.4);
+			border-radius: 6px;
 			color: var(--accent-color);
-			background: #0C5CAB;
-			box-shadow: inset 0 1px 0 rgba(250,250,250,0.04);
+			background: var(--accent-soft);
+			box-shadow: none;
 		}
-		.error-icon svg { width: 22px; height: 22px; }
-		h1 { font-size: clamp(22px, 5vw, 26px); line-height: 1.35; letter-spacing: -0.025em; font-weight: 600; margin-bottom: 12px; }
-		p { color: var(--text-muted); font-size: 14px; line-height: 1.8; margin-bottom: 24px; overflow-wrap: anywhere; }
+		.error-icon svg { width: 20px; height: 20px; }
+		h1 { font-size: 20px; line-height: 1.3; font-weight: 600; margin-bottom: 12px; }
+		p { color: var(--text-muted); font-size: 14px; line-height: 1.65; margin-bottom: 20px; overflow-wrap: anywhere; }
 		strong { color: var(--text-main); font-weight: 600; }
-		.code-block { background: #1d1d1f; box-shadow: inset 0 1px 3px rgba(9,9,11,0.16); border: 1px solid var(--border-color); border-radius: 8px; padding: 18px; color: var(--text-muted); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
-		.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 24px; padding: 10px 18px; background: #0C5CAB; color: #fafafa; box-shadow: inset 0 1px 0 rgba(250,250,250,0.14), 0 3px 8px rgba(9,9,11,0.14); border: 1px solid transparent; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; transition: background-color 0.15s; }
-		.btn:hover { background: #0C5CAB; }
-		.btn:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 4px; }
+		.code-block { background: #161b22; border: 1px solid var(--border-color); border-radius: 6px; padding: 16px; color: var(--text-muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+		.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; margin-top: 20px; padding: 5px 14px; background: #1f6feb; color: #ffffff; border: 1px solid rgba(240, 246, 252, 0.1); border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.1s; }
+		.btn:hover { background: #388bfd; }
+		.btn:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 		@media (max-height: 600px) { body { align-items: flex-start; } }
 		@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
-
-        /* Enterprise 品牌表面；自包含页面继续离线可读，不引入 CDN 资源。 */
-        :root {
-          --bg-color: #09090b; --sidebar-bg: #09090b; --card-bg: #161618;
-          --border-color: rgba(250,250,250,.12); --text-main: #fafafa; --text-muted: #b2b2b3;
-          --primary-gradient: #0C5CAB; --primary-bg: #0C5CAB; --primary-hover: #0a4a8a; --primary-text: #fafafa;
-          --accent-color: #97bddf; --accent-contrast: #09090b; --accent-soft: rgba(12,92,171,.22);
-          --success-color: #10b981; --warning-color: #f59e0b; --danger-color: #ef4444;
-          --input-bg: #09090b; --input-border: rgba(250,250,250,.24); --input-text: #fafafa;
-          --btn-secondary-bg: #222224; --btn-secondary-hover: #303032; --btn-secondary-text: #fafafa;
-          --modal-overlay-bg: rgba(9,9,11,.72); --surface-fill: var(--card-bg); --card-shadow: none;
-          --brand-top: #0C5CAB; --brand-bottom: #0a4a8a; --sidebar-menu-hover: #1c1c1e;
-          --table-header-bg: #222224; --section-item-bg: #1c1c1e; --code-bg: #222224; --code-color: #fafafa; --code-border: rgba(250,250,250,.12);
-        }
-        :root[data-theme="light"] {
-          --bg-color: #fafafa; --sidebar-bg: #eeeeef; --card-bg: #eeeeef; --text-main: #09090b; --text-muted: #626263;
-          --border-color: rgba(9,9,11,.12); --accent-color: #0C5CAB; --accent-soft: rgba(12,92,171,.10);
-          --input-bg: #fafafa; --input-border: rgba(9,9,11,.24); --input-text: #09090b;
-          --btn-secondary-bg: #e2e2e3; --btn-secondary-hover: #d3d3d4; --btn-secondary-text: #09090b;
-          --surface-fill: var(--card-bg); --sidebar-menu-hover: #e2e2e3; --table-header-bg: #e2e2e3;
-          --section-item-bg: #fafafa; --code-bg: #fafafa; --code-color: #09090b; --code-border: rgba(9,9,11,.12);
-        }
-        body { font-family: 'IBM Plex Sans', 'Microsoft YaHei', system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
-        .hero h1, .page-title, h1 { font-size: 32px; line-height: 1.25; letter-spacing: -.02em; }
-        h2, .section-title { font-size: 24px; line-height: 1.3; } h3 { font-size: 20px; }
-        .hero-description { font-size: 16px; } .eyebrow, .brand-tag, .endpoint-label { font-size: 12px; }
-        .logo-icon { background: #0C5CAB; color: #fafafa; border: 0; border-radius: 4px; box-shadow: none; }
-        .stat-card, .section-card, .error-card, .modal-content { border: 0; border-radius: 8px; background: var(--card-bg); box-shadow: none; }
-        .btn, .floating-btn, .nav-item, .badge, .endpoint-list code, input, select, textarea { border-radius: 4px; }
-        .btn, .floating-btn, .nav-item { border-color: transparent; box-shadow: none; }
-        .stat-title { font-size: 16px; font-weight: 500; } #view-title { font-size: 32px; } .stat-card > div:first-child > svg { display: none; }
-        .stat-value { font-size: 32px; font-variant-numeric: tabular-nums; }
-        .site-header, .sidebar, .page-footer { border-color: transparent; }
-        .error-icon { background: var(--accent-soft); border: 0; border-radius: 4px; box-shadow: none; }
-        .error-card .btn { background: #0C5CAB; color: #fafafa; }
-        @media(max-width:680px) { .hero h1, .page-title, h1 { font-size: 32px; } .hero { gap: 24px; } }
-
-
-        :root[data-theme="light"] { --success-color: #087453; --warning-color: #875809; --danger-color: #b53132; }
-</style>
+	</style>
 </head>
 <body>
 	<div class="error-card">
@@ -6942,16 +7073,17 @@ function handlePasswordError(request) {
 	<style>
 		:root {
 			color-scheme: dark;
-			--bg-color: #1a1a1c;
-			--card-bg: #0C5CAB;
-			--border-color: #0C5CAB;
-			--text-main: #ececed;
-			--text-muted: #b2b2b3;
-			--accent-color: #0C5CAB;
+			--bg-color: #010409;
+			--card-bg: #0d1117;
+			--border-color: #30363d;
+			--text-main: #f0f6fc;
+			--text-muted: #8b949e;
+			--accent-color: #2f81f7;
+			--accent-soft: rgba(56, 139, 253, 0.15);
 		}
 		* { box-sizing: border-box; margin: 0; padding: 0; }
 		body {
-			font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+			font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
 			background: var(--bg-color);
 			color: var(--text-main);
 			min-height: 100vh;
@@ -6964,75 +7096,36 @@ function handlePasswordError(request) {
 		.error-card {
 			width: 100%;
 			max-width: 600px;
-			padding: clamp(24px, 5vw, 40px);
+			padding: clamp(24px, 5vw, 36px);
 			background: var(--card-bg);
 			border: 1px solid var(--border-color);
-			border-radius: 8px;
-			box-shadow: 0 20px 48px rgba(9,9,11,0.28), inset 0 1px 0 rgba(250,250,250,0.045);
+			border-radius: 6px;
+			box-shadow: none;
 		}
 		.error-icon {
 			display: inline-flex;
 			align-items: center;
 			justify-content: center;
-			width: 44px;
-			height: 44px;
-			margin-bottom: 24px;
-			border: 1px solid var(--border-color);
-			border-radius: 8px;
+			width: 40px;
+			height: 40px;
+			margin-bottom: 20px;
+			border: 1px solid rgba(56, 139, 253, 0.4);
+			border-radius: 6px;
 			color: var(--accent-color);
-			background: #0C5CAB;
-			box-shadow: inset 0 1px 0 rgba(250,250,250,0.04);
+			background: var(--accent-soft);
+			box-shadow: none;
 		}
-		.error-icon svg { width: 22px; height: 22px; }
-		h1 { font-size: clamp(22px, 5vw, 26px); line-height: 1.35; letter-spacing: -0.025em; font-weight: 600; margin-bottom: 12px; }
-		p { color: var(--text-muted); font-size: 14px; line-height: 1.8; margin-bottom: 24px; overflow-wrap: anywhere; }
+		.error-icon svg { width: 20px; height: 20px; }
+		h1 { font-size: 20px; line-height: 1.3; font-weight: 600; margin-bottom: 12px; }
+		p { color: var(--text-muted); font-size: 14px; line-height: 1.65; margin-bottom: 20px; overflow-wrap: anywhere; }
 		strong { color: var(--text-main); font-weight: 600; }
-		.code-block { background: #1d1d1f; box-shadow: inset 0 1px 3px rgba(9,9,11,0.16); border: 1px solid var(--border-color); border-radius: 8px; padding: 18px; color: var(--text-muted); font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
-		.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; margin-top: 24px; padding: 10px 18px; background: #0C5CAB; color: #fafafa; box-shadow: inset 0 1px 0 rgba(250,250,250,0.14), 0 3px 8px rgba(9,9,11,0.14); border: 1px solid transparent; border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600; transition: background-color 0.15s; }
-		.btn:hover { background: #0C5CAB; }
-		.btn:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 4px; }
+		.code-block { background: #161b22; border: 1px solid var(--border-color); border-radius: 6px; padding: 16px; color: var(--text-muted); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+		.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; margin-top: 20px; padding: 5px 14px; background: #1f6feb; color: #ffffff; border: 1px solid rgba(240, 246, 252, 0.1); border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500; transition: background-color 0.1s; }
+		.btn:hover { background: #388bfd; }
+		.btn:focus-visible { outline: 2px solid var(--accent-color); outline-offset: 2px; }
 		@media (max-height: 600px) { body { align-items: flex-start; } }
 		@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
-
-        /* Enterprise 品牌表面；自包含页面继续离线可读，不引入 CDN 资源。 */
-        :root {
-          --bg-color: #09090b; --sidebar-bg: #09090b; --card-bg: #161618;
-          --border-color: rgba(250,250,250,.12); --text-main: #fafafa; --text-muted: #b2b2b3;
-          --primary-gradient: #0C5CAB; --primary-bg: #0C5CAB; --primary-hover: #0a4a8a; --primary-text: #fafafa;
-          --accent-color: #97bddf; --accent-contrast: #09090b; --accent-soft: rgba(12,92,171,.22);
-          --success-color: #10b981; --warning-color: #f59e0b; --danger-color: #ef4444;
-          --input-bg: #09090b; --input-border: rgba(250,250,250,.24); --input-text: #fafafa;
-          --btn-secondary-bg: #222224; --btn-secondary-hover: #303032; --btn-secondary-text: #fafafa;
-          --modal-overlay-bg: rgba(9,9,11,.72); --surface-fill: var(--card-bg); --card-shadow: none;
-          --brand-top: #0C5CAB; --brand-bottom: #0a4a8a; --sidebar-menu-hover: #1c1c1e;
-          --table-header-bg: #222224; --section-item-bg: #1c1c1e; --code-bg: #222224; --code-color: #fafafa; --code-border: rgba(250,250,250,.12);
-        }
-        :root[data-theme="light"] {
-          --bg-color: #fafafa; --sidebar-bg: #eeeeef; --card-bg: #eeeeef; --text-main: #09090b; --text-muted: #626263;
-          --border-color: rgba(9,9,11,.12); --accent-color: #0C5CAB; --accent-soft: rgba(12,92,171,.10);
-          --input-bg: #fafafa; --input-border: rgba(9,9,11,.24); --input-text: #09090b;
-          --btn-secondary-bg: #e2e2e3; --btn-secondary-hover: #d3d3d4; --btn-secondary-text: #09090b;
-          --surface-fill: var(--card-bg); --sidebar-menu-hover: #e2e2e3; --table-header-bg: #e2e2e3;
-          --section-item-bg: #fafafa; --code-bg: #fafafa; --code-color: #09090b; --code-border: rgba(9,9,11,.12);
-        }
-        body { font-family: 'IBM Plex Sans', 'Microsoft YaHei', system-ui, sans-serif; font-size: 16px; line-height: 1.5; }
-        .hero h1, .page-title, h1 { font-size: 32px; line-height: 1.25; letter-spacing: -.02em; }
-        h2, .section-title { font-size: 24px; line-height: 1.3; } h3 { font-size: 20px; }
-        .hero-description { font-size: 16px; } .eyebrow, .brand-tag, .endpoint-label { font-size: 12px; }
-        .logo-icon { background: #0C5CAB; color: #fafafa; border: 0; border-radius: 4px; box-shadow: none; }
-        .stat-card, .section-card, .error-card, .modal-content { border: 0; border-radius: 8px; background: var(--card-bg); box-shadow: none; }
-        .btn, .floating-btn, .nav-item, .badge, .endpoint-list code, input, select, textarea { border-radius: 4px; }
-        .btn, .floating-btn, .nav-item { border-color: transparent; box-shadow: none; }
-        .stat-title { font-size: 16px; font-weight: 500; } #view-title { font-size: 32px; } .stat-card > div:first-child > svg { display: none; }
-        .stat-value { font-size: 32px; font-variant-numeric: tabular-nums; }
-        .site-header, .sidebar, .page-footer { border-color: transparent; }
-        .error-icon { background: var(--accent-soft); border: 0; border-radius: 4px; box-shadow: none; }
-        .error-card .btn { background: #0C5CAB; color: #fafafa; }
-        @media(max-width:680px) { .hero h1, .page-title, h1 { font-size: 32px; } .hero { gap: 24px; } }
-
-
-        :root[data-theme="light"] { --success-color: #087453; --warning-color: #875809; --danger-color: #b53132; }
-</style>
+	</style>
 </head>
 <body>
 	<div class="error-card">
