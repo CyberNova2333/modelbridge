@@ -50,6 +50,9 @@ test('patched Vite serves the default guide, initial local search, HMR and bound
   let server, socket;
   const cwd = process.cwd();
   t.after(async () => {
+    // HTTP/HMR responses can complete before Vite finishes their background
+    // transforms. Drain those requests before closing plugins and the optimizer.
+    await server?.waitForRequestsIdle();
     socket?.close();
     await server?.close();
     for (const [path, allowed] of ownedFiles) {
