@@ -35,6 +35,21 @@ features:
 
 它解决了多模型混合调度中的核心难题：“谁能调用”、“用哪个账号与凭据”、“哪些协议特殊约束能被兑现”，以及“如何避免故障重试风暴”。无论客户端使用哪种 SDK 规范，ModelBridge 均能自适应转换请求结构，并提供统一的鉴权、用量记账与故障隔离保障。
 
+
+## 架构全景
+
+<div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
+  <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
+    <span style="font-weight: 600; color: var(--vp-c-text-1); display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 16px;">📐</span> 多平台边缘计算适配矩阵（交互式架构图表，支持平移 / 缩放 / 探查）
+    </span>
+    <a href="/diagrams/modelbridge-architecture.html" target="_blank" rel="noreferrer" style="font-size: 12px; color: var(--vp-c-brand-1); text-decoration: none; font-weight: 500;">
+      在新窗口全屏打开 ↗
+    </a>
+  </div>
+  <iframe src="/diagrams/modelbridge-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
+</div>
+
 ## 怎么用 / 快速上手
 
 ### 1. 本地验证与测试
