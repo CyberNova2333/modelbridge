@@ -109,6 +109,33 @@ test('custom mapping overrides and an intentionally empty mapping table are resp
   assert.deepEqual((await (await proxy('/v1/models')).json()).data, []);
 });
 
+test('model catalog deduplicates large overlapping declarations while preserving order and first-owner metadata', async () => {
+  const { module, proxy } = await createHarness();
+  const models = Array.from({ length: 5000 }, (_, index) => 'model-' + index);
+  module.setTestConfig({
+    accounts: [
+      { id: 'one', provider: 'openai', accountId: '', apiToken: 'fixture-one', status: 'active', models },
+      { id: 'two', provider: 'anthropic', accountId: '', apiToken: 'fixture-two', status: 'active', models: ['model-0', 'shared'] },
+      { id: 'three', provider: 'openai', accountId: '', apiToken: 'fixture-three', status: 'active', models: ['shared', 'model-0'] },
+      { id: 'disabled', provider: 'gemini', accountId: '', apiToken: 'fixture-disabled', status: 'disabled', models: ['hidden'] },
+    ],
+    apiKeys: [{ key: 'mock-gateway-key' }],
+    customModelMap: { 'model-0': 'openai:model-0', 'openai:model-1': 'openai:model-1' },
+  });
+  const response = await proxy('/v1/models');
+  assert.equal(response.status, 200);
+  const { data } = await response.json();
+  assert.equal(data.length, 10004);
+  assert.equal(new Set(data.map(model => model.id)).size, data.length);
+  assert.deepEqual(data.slice(0, 4).map(model => [model.id, model.owned_by]), [
+    ['model-0', 'meta'], ['openai:model-1', 'meta'], ['openai:model-0', 'openai'], ['model-1', 'openai'],
+  ]);
+  assert.deepEqual(data.slice(-4).map(model => [model.id, model.owned_by]), [
+    ['anthropic:model-0', 'anthropic'], ['shared', 'anthropic'], ['anthropic:shared', 'anthropic'], ['openai:shared', 'openai'],
+  ]);
+  assert.equal(data.some(model => model.id.includes('hidden')), false);
+});
+
 test('account rows render names as text and preserve edit/delete arguments through listeners', async () => {
   const { module, env } = await createHarness();
   const page = module.handleAdminPage(new Request('https://worker.test/admin'), env, {});
