@@ -1,0 +1,14 @@
+name = "modelbridge-remote"
+main = "worker.js"
+compatibility_date = "2026-06-30"
+compatibility_flags = ["global_fetch_strictly_public", "enable_request_signal"]
+workers_dev = true
+preview_urls = false
+
+# Runtime Secrets: ADMIN_PASSWORD, MODELBRIDGE_STATE_URL, MODELBRIDGE_STATE_TOKEN.
+# No KV, Durable Object binding, or migration is needed by this entry.
+[observability]
+redact_query_string = true
+
+[observability.logs]
+enabled = false

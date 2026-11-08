@@ -10,7 +10,7 @@
 | 网关调用密钥（API Key） | 供客户端访问模型目录、聊天和向量接口 | 不授予后台管理权限，不直接作为供应商凭据发送 |
 | 上游凭据 | 由选中的账号用于供应商请求；包括 API Key、Cloudflare Token、OAuth 刷新令牌 | 不作为客户端调用密钥或管理员会话 |
 
-部署必须具备 `KV`、`CONFIG_STORE` 和管理员 Secret。配置缺失会阻止正常服务；没有调用密钥或删除最后一个密钥时，模型入口也不会自动开放。具体绑定方式见[根 README](../../README.md)。
+远程状态部署中，三个平台通过独立服务令牌访问同一自建 SQLite 服务，不需要 KV/DO；原生 Cloudflare 兼容部署仍必须具备 `KV`、`CONFIG_STORE` 和管理员 Secret。第四类高权限服务凭据和部署范围见[多平台入口](platform-adapters.md)。配置缺失会阻止正常服务；没有调用密钥或删除最后一个密钥时，模型入口也不会自动开放。具体设置见[根 README](../../README.md)。
 
 管理员登录后获得随机、不透明的会话令牌。浏览器通过 `HttpOnly; Secure; SameSite=Strict` Cookie 携带会话，服务端保存令牌哈希，并检查来源站点、密码指纹和 24 小时有效期。退出登录撤销服务端会话；更换管理员 Secret 会使对应来源的旧会话失效。密码哈希本身不是可用的管理员令牌。管理写入还会拒绝带有外站 `Origin` 的请求。
 
@@ -27,13 +27,13 @@
 | 请求 B 保存模型映射 | 执行 `models.replace`，只替换映射，不提交旧的整份配置 |
 | 后续请求使用 K | 从当前配置读取调用密钥，K 不会被旧快照复活 |
 
-配置权威是 Durable Object 中 `app-config-v1` 对象的 `config` 记录。账号增删、密钥增删和映射替换在对象内串行执行；Worker 的配置缓存只存在于单次请求中，不能跨请求延长已撤销权限。
+自建部署的配置权威是 SQLite `state_records` 表中的 `config` 记录；原生 DO 模式则是 `app-config-v1` 对象中的同名记录。账号增删、密钥增删和映射替换共享同一业务引擎，SQLite 用事务覆盖完整读改写，DO 在对象内串行执行。网关配置缓存只存在于单次请求中，不能跨请求延长已撤销权限；后端故障不会触发另一权威的回退。
 
-只有当持久化配置尚不存在时，才读取旧 `KV` 的 `config` 进行一次迁移；新安装没有旧配置时初始化默认映射及空账号、空密钥列表。已经存在的配置不会被旧 KV 覆盖。旧配置或权威配置损坏时拒绝加载，而不是恢复可能含已撤销密钥的旧快照。显式保存的空映射 `{}` 也不会被当作缺失配置重新填满。
+原生 DO 只有在持久化配置尚不存在时，才读取旧 `KV` 的 `config` 进行一次迁移。自建服务从不读取 KV，只允许在尚无业务状态的数据库中显式导入配置。新安装初始化默认映射及空账号、空密钥列表；已有配置不会被旧快照覆盖。旧配置或权威配置损坏时拒绝加载，而不是恢复可能含已撤销密钥的快照。显式保存的空映射 `{}` 也不会被当作缺失配置重新填满。
 
 账号保存可能先进行 OAuth 登录与项目查询。等待网络期间，其他请求仍可能更新或删除账号，因此写入前会比较账号版本；不一致返回 409，要求重新加载。该比较与串行配置操作一起保护持久化结果，不表示所有业务网络请求都被一个全局锁串行化。
 
-[配置实现](../../_worker.js)可定位 `AppConfigStore / configRequest / getAppConfig / expectedAccountRevision`；[请求间隔离断言](../../tests/config-scope-regressions.test.mjs)与[异步验证冲突断言](../../tests/quota-project-regressions.test.mjs)补充检查跨请求和网络等待边界。
+[配置实现](../../_worker.js)可定位 `GatewayStateStore / AppConfigStore / configRequest / expectedAccountRevision`；[SQLite 实现](../../src/state/sqlite.mjs)及[真实持久化断言](../../tests/sqlite-state.test.mjs)覆盖跨连接、跨进程事务与重启。[请求间隔离断言](../../tests/config-scope-regressions.test.mjs)与[异步验证冲突断言](../../tests/quota-project-regressions.test.mjs)补充检查网络等待边界。具体迁移、备份和单机运行约束见[平台状态服务](platform-adapters.md)。
 
 ## 编辑账号时凭据怎样保留
 

@@ -17,9 +17,11 @@
   <a href="#quick-deployment">Quick deployment</a> · <a href="repo-docs/README.md">Project guide</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-ModelBridge is a multi-model, multi-protocol API gateway for Cloudflare Workers. Configure upstream accounts and model aliases, then use OpenAI, Anthropic or Gemini client interfaces to call supported models. Its blue management interface handles accounts, gateway keys and Cloudflare usage.
+ModelBridge is a multi-model, multi-protocol API gateway with a native Cloudflare Workers entry and platform adapters for EdgeOne Makers and Alibaba Cloud ESA. Configure upstream accounts and model aliases, then use OpenAI, Anthropic or Gemini client interfaces to call supported models. Its blue management interface handles accounts, gateway keys and Cloudflare usage.
 
-Based on [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API), it supports Cloudflare Workers AI, OpenAI-compatible services, Anthropic, Gemini and an experimental Antigravity (Google Cloud Code) integration. Pages deployments also require a Durable Object hosted by a Worker.
+The recommended deployment uses a self-hosted Node.js 24 + SQLite state service. Cloudflare Workers, Makers and ESA connect over HTTPS without requiring Cloudflare DO or KV. Native DO deployments retain a compatibility and migration path. Platform capacities differ, and real cloud acceptance is pending. See the [platform guide](repo-docs/modules/platform-adapters.md) (Chinese).
+
+Based on [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API), it supports Cloudflare Workers AI, OpenAI-compatible services, Anthropic, Gemini and an experimental Antigravity (Google Cloud Code) integration. The native Pages setup described below requires a Durable Object hosted by a Worker.
 
 Brand assets: [horizontal logo](assets/modelbridge-logo.svg) · [square icon](assets/modelbridge-icon.svg). The website name is set by `PROJECT_DISPLAY_NAME`, independently of the Wrangler Worker service name.
 
@@ -49,7 +51,7 @@ The detailed living guide is maintained in Chinese; this README provides the cor
 - Multiple accounts, model aliases, per-account model declarations and bounded failover across at most three candidate accounts.
 - Supported JSON and streaming conversions preserve tool calls, refusals, truncation and signed thinking. Constraints that cannot be represented produce explicit errors.
 - Separate administrator authentication, client gateway keys and upstream credentials. Model access stays closed until a gateway key exists and closes after the last key is deleted.
-- SQLite Durable Object configuration preserves concurrent updates and key revocation; Cloudflare usage is displayed from a cache.
+- A self-hosted SQLite transaction store or native Durable Object preserves concurrent configuration updates and key revocation; Cloudflare usage is displayed from a cache.
 
 The model catalog includes several task types. A listed model is not necessarily callable through chat. Full image, audio and other media-generation APIs, and exact cross-provider token counting, are not implemented. Real model access depends on upstream permissions; mocked tests do not establish production acceptance.
 
@@ -58,11 +60,13 @@ The model catalog includes several task types. A listed model is not necessarily
 Clone the public repository:
 
 ```sh
-git clone https://cnb.cool/CyberNova2333/modelbridge.git
+git clone https://github.com/CyberNova2333/modelbridge.git
 cd modelbridge
 ```
 
-### Workers (recommended)
+For new deployments, use the [self-hosted state service and platform entries](repo-docs/modules/platform-adapters.md). The following native Cloudflare DO setup remains available for existing deployments.
+
+### Workers (native DO compatibility)
 
 Install Node.js 24+, sign in to your own Cloudflare account with Wrangler, and create a KV namespace:
 
@@ -118,6 +122,20 @@ script_name = "YOUR_CONFIG_WORKER_NAME"
 4. Enable `global_fetch_strictly_public` and `enable_request_signal` for Pages. Prefer client keys in request headers, separately check whether Pages logs retain query parameters, and redeploy.
 
 Keep Pages and its hosting Worker on the same code version. Upgrade the Worker first; it owns the migration. They share configuration, but each entry point authenticates against its own administrator Secret, with sessions isolated by origin.
+
+### Self-hosted state + Cloudflare / EdgeOne Makers / Alibaba Cloud ESA
+
+Generate deployment projects with Node.js 24+, without installing root npm dependencies:
+
+```sh
+node tools/build-platforms.mjs
+```
+
+For a new deployment, use `dist/self-hosted-state/` with `dist/cloudflare-remote/`, `dist/edgeone/` or `dist/esa/` gateway entries. `dist/cloudflare/` and `dist/state-service/` remain available for native DO hosting and migration. Each project includes templates and a README. Building does not read real Secrets, change the existing Wrangler configuration or publish services.
+
+Follow the [self-hosted service setup](deploy/self-hosted-state/README.md) to prepare persistent local storage and an HTTPS reverse proxy. Configure `DB_PATH`, `MODELBRIDGE_STATE_PUBLIC_ORIGIN`, an independent `MODELBRIDGE_STATE_TOKEN` (or token file), and exact allowed gateway origins in `MODELBRIDGE_STATE_ORIGINS`. Each gateway needs `ADMIN_PASSWORD`, the shared service token and the full `MODELBRIDGE_STATE_URL`, such as `https://state.example/_modelbridge/state`. The service token grants access to upstream credentials and state mutations: keep it exclusively in server-side Secrets. SQLite hosting targets one machine with a local disk; shared network filesystems and independent multi-host writers are unsupported.
+
+Build Makers as a project with only `public/` as static output; deploy ESA as a pure function. The Makers application budget is 1 MiB, subject to any smaller platform ceiling. ESA adapters enforce four outbound requests, a nine-second first-data deadline and a 115-second total deadline. Missing native cancellation APIs fail closed. Deployment, shared login-rate-limit buckets and acceptance boundaries are explained in the [platform guide](repo-docs/modules/platform-adapters.md).
 
 ## First use
 
@@ -217,11 +235,13 @@ The public homepage reads cached summaries. Administrator refreshes query Cloudf
 | Antigravity connection test | Checks sign-in and project, without generating an answer |
 | Cloudflare connection test | Includes one small embedding inference and consumes quota; 15-second header/idle timeout and 1 MiB response limit |
 
+These are shared-core limits. Makers also enforces a 1 MiB application input budget and its platform limit; ESA adds a 9-second first-data deadline, a 115-second total deadline and four outbound fetches per request, including state queries. See [platform budgets](repo-docs/modules/platform-adapters.md#平台预算怎样影响请求).
+
 Upstream errors and SSE metadata are sanitized; ordinary model text and signatures retain their values. Client cancellation propagates to the upstream connection, but does not prove that computation or billing stopped. Embedding outputs are checked for count, indices, dimensions and encoding; invalid output returns 502 without repeating generation on another account. See [Upstreams and quota](repo-docs/modules/upstream-and-quota.md).
 
 ## Local verification and contribution
 
-Regression tests need Node.js 24+, Python 3.10+ and Git, with no root npm installation. They use mocked upstreams and storage; Python and Git exercise the maintenance guard in temporary repositories.
+Regression tests need Node.js 24+, Python 3.10+ and Git, with no root npm installation. Model upstreams and DO/KV are mocked; self-hosted state also uses real temporary SQLite databases, independent processes and loopback HTTP. Python and Git exercise the maintenance guard in temporary repositories.
 
 ```sh
 node --test tests/*.test.mjs

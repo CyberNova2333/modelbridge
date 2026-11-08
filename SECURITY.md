@@ -6,6 +6,18 @@
 
 Review the credential, configuration, upstream and quota boundaries in the linked guide pages. In a private report, include the affected route and client protocol, upstream type, JSON or streaming response, trigger, expected and actual behavior, and a minimal public-safe reproduction. Replace administrator passwords, client keys, upstream tokens, OAuth credentials and private configuration with placeholders. Do not attach raw configuration exports or complete request logs.
 
+多平台部署额外使用 `MODELBRIDGE_STATE_TOKEN` 访问完整配置及会话操作。该 Bearer 服务凭据具有 DO binding 等价权限，只能保存在获授权网关与状态服务的运行时 Secret 中；精确 origin 限制不能防止已窃取令牌被重放。泄露时轮换该令牌并核查上游凭据和配置操作，不能仅删除浏览器会话。状态服务默认关闭持久化请求日志，平台访问日志的查询参数脱敏仍须单独确认。详见[平台信任边界](repo-docs/modules/platform-adapters.md)。
+
+Multi-platform deployments add a binding-equivalent service credential, `MODELBRIDGE_STATE_TOKEN`, which can read complete configuration and perform session operations. Keep it only in authorized server-side Secrets. Exact origin restrictions do not prevent replay of a stolen Bearer token. Rotate an exposed service token and review upstream credentials and configuration changes; clearing browser sessions alone is insufficient. State-service persistent request logs are disabled by default; separately verify URL-query redaction on each hosting platform.
+
+自建状态服务的 SQLite、WAL、配置导出及备份包含上游凭据和调用密钥，不自带静态加密。使用受限文件权限、磁盘加密及受控备份；Windows 另设服务账号 ACL。HTTP 监听默认只在回环地址，公网必须经 HTTPS 反代；固定 public origin 不代表内网链路自动加密。切换权威或恢复旧备份前停止旧写入并核对期间撤销，避免恢复已失效的访问权；导入工具只接受空库，不自动回退到 DO、KV 或备份。新库导入不复制旧会话和用量缓存。
+
+Self-hosted SQLite files, WAL files, configuration exports and backups contain upstream credentials and gateway keys without built-in encryption at rest. Restrict filesystem access, use disk encryption and protect backups; configure service-account ACLs on Windows. The default HTTP listener is loopback-only and public access requires an HTTPS reverse proxy. Before authority cutover or restoring an older backup, stop old writers and reconcile revocations. Imports require an empty database and omit old sessions and usage caches; no backend or backup fallback is automatic.
+
+依赖报告应注明实际锁文件、Node 内嵌组件版本或镜像 digest，以及受影响代码在网关、代理、文档构建或 CLI 中的调用条件。当前 Caddy 模板限制为 HTTPS/HTTP 1.1，以缓解所审计 Go HTTP/2 漏洞；不代表镜像所有 CVE 已修复。CLI 安装禁用生命周期脚本并保留当次解析锁文件，但仍执行第三方程序，不是系统沙箱。文档站审计不能覆盖容器或工具链，范围与未消除告警见[依赖审计说明](repo-docs/modules/platform-adapters.md#怎样读取依赖审计结果)及[审查记录](repo-docs/change-log.md)。
+
+Dependency reports should identify the resolved lockfile, embedded runtime versions or image digest, and the affected call path. The Caddy template uses HTTPS with HTTP/1.1 to mitigate the reviewed Go HTTP/2 issues; this does not fix every image CVE. CLI installation disables lifecycle scripts and retains each run's resolved lockfile, but executing a CLI still runs third-party code. A clean documentation-site audit does not cover containers or maintenance tools; see the linked scope and review records.
+
 <!-- repo-maintenance:begin -->
 ## 本地提交与推送检查 / Local commit and push checks
 

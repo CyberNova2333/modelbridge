@@ -17,9 +17,11 @@
   <a href="#快速部署">快速部署</a> · <a href="repo-docs/README.md">项目文档</a> · <a href="CONTRIBUTING.md">贡献指南</a>
 </p>
 
-模桥 ModelBridge 是部署在 Cloudflare Workers 上的多模型、多协议 API 网关。配置上游账号和模型别名后，客户端可以通过 OpenAI、Anthropic 或 Gemini 接口调用受支持的模型，并在蓝色管理面板管理账号、调用密钥和 Cloudflare 用量。
+模桥 ModelBridge 是多模型、多协议 API 网关，提供原生 Cloudflare Workers 入口，以及 EdgeOne Makers、阿里云 ESA 的平台适配器。配置上游账号和模型别名后，客户端可以通过 OpenAI、Anthropic 或 Gemini 接口调用受支持的模型，并在蓝色管理面板管理账号、调用密钥和 Cloudflare 用量。
 
-项目基于 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 开发，支持 Cloudflare Workers AI、OpenAI 兼容服务、Anthropic、Gemini，以及实验性的 Antigravity（Google Cloud Code）接入。Pages 部署需要额外绑定由 Worker 托管的 Durable Object。
+推荐使用 Node.js 24 + SQLite 自建权威状态服务，Cloudflare Workers、Makers、ESA 均通过 HTTPS 接入，无需 Cloudflare DO 或 KV。原生 DO 部署保留兼容与迁移路径；平台容量存在差异，真实云端运行仍待验收。详见[多平台部署与限制](repo-docs/modules/platform-adapters.md)。
+
+项目基于 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 开发，支持 Cloudflare Workers AI、OpenAI 兼容服务、Anthropic、Gemini，以及实验性的 Antigravity（Google Cloud Code）接入。下文的原生 Pages 部署方案需要额外绑定由 Worker 托管的 Durable Object。
 
 品牌素材：[横版 Logo](assets/modelbridge-logo.svg) · [独立图标](assets/modelbridge-icon.svg)。网页显示名由 `PROJECT_DISPLAY_NAME` 设置，与 Wrangler 的 Worker 服务名独立。
 
@@ -47,7 +49,7 @@
 - 支持多账号、模型别名、账号模型声明和最多三个候选账号的有限故障切换。
 - 转换受支持的 JSON 与流式响应，保留工具调用、拒绝、截断和签名思考的语义；无法表达的约束会明确报错。
 - 管理员登录、客户端调用密钥和上游凭据分离。未创建调用密钥或删除最后一个密钥后，模型调用入口保持关闭。
-- 配置以 SQLite Durable Object 为准，保留并发更新与密钥撤销；Cloudflare 用量通过缓存展示。
+- 配置由自建 SQLite 事务或原生 Durable Object 统一保存，保留并发更新与密钥撤销；Cloudflare 用量通过缓存展示。
 
 模型目录包含多种任务，并不意味着所有模型都能通过聊天接口调用。本项目没有实现完整的图片、音频或其他媒体生成 API，也不提供跨供应商精确 token 计数。真实模型权限取决于上游账号，模拟测试不等于生产验收。
 
@@ -56,11 +58,13 @@
 从公开仓库获取源码：
 
 ```sh
-git clone https://cnb.cool/CyberNova2333/modelbridge.git
+git clone https://github.com/CyberNova2333/modelbridge.git
 cd modelbridge
 ```
 
-### Workers（推荐）
+推荐新部署采用[自建状态服务与多平台入口](repo-docs/modules/platform-adapters.md)。下面先保留原生 Cloudflare DO 部署步骤，便于已有实例维护。
+
+### Workers（原生 DO 兼容部署）
 
 先安装 Node.js 24+，使用 Wrangler 登录自己的 Cloudflare 账号并创建 KV：
 
@@ -116,6 +120,20 @@ script_name = "YOUR_CONFIG_WORKER_NAME"
 4. 在 Pages 兼容性配置中启用 `global_fetch_strictly_public` 和 `enable_request_signal`；客户端优先用请求头传密钥，单独核对 Pages 日志是否保留查询参数，再重新部署。
 
 Pages 与托管 Worker 应使用相同版本代码，升级时先更新 Worker，再更新 Pages；迁移由托管 Worker 管理。两者共享配置，但各入口使用自己的管理员 Secret，会话按入口 origin 隔离。
+
+### 自建状态服务 + Cloudflare / EdgeOne Makers / 阿里云 ESA
+
+使用 Node.js 24+ 生成部署项目，无需安装根目录 npm 依赖：
+
+```sh
+node tools/build-platforms.mjs
+```
+
+新部署使用 `dist/self-hosted-state/`，再选择 `dist/cloudflare-remote/`、`dist/edgeone/` 或 `dist/esa/` 作为网关入口。`dist/cloudflare/` 和 `dist/state-service/` 保留原生 DO 与旧实例迁移用途。各项目带有模板和 README；构建不读取真实 Secret、不修改现有 Wrangler 配置、不发布服务。
+
+先按[自建服务说明](deploy/self-hosted-state/README.md)准备持久化本地磁盘和 HTTPS 反代。服务配置 `DB_PATH`、`MODELBRIDGE_STATE_PUBLIC_ORIGIN`、独立 `MODELBRIDGE_STATE_TOKEN`（或令牌文件）及精确入口列表 `MODELBRIDGE_STATE_ORIGINS`；各网关配置 `ADMIN_PASSWORD`、同一服务令牌和完整 `MODELBRIDGE_STATE_URL`。服务令牌能读取上游凭据并修改状态，必须只保存在服务端 Secret 中。SQLite 版本面向单机部署，不支持把数据库放在网络文件系统上共享或多机独立写入。
+
+Makers 以项目模式构建函数，只把 `public/` 作为静态输出；ESA 使用纯函数入口。Makers 应用输入预算为 1 MiB，实际受平台更小上限约束；ESA 适配器限制四次出站请求、9 秒首个响应数据、115 秒总时长。原生取消 API 缺失时明确拒绝服务。完整步骤、共享限流桶、跨入口会话与验收边界见[平台指南](repo-docs/modules/platform-adapters.md)。
 
 ## 首次使用
 
@@ -215,11 +233,13 @@ curl 'https://YOUR_GATEWAY_DOMAIN/v1beta/models/gpt-oss-20b:generateContent' \
 | Antigravity 连接测试 | 验证登录和项目，不生成回答 |
 | Cloudflare 连接测试 | 含一次小型向量推理，会消耗额度；15 秒响应头/闲置超时、1 MiB 响应上限 |
 
+上表为共享核心的限制。Makers 输入还受 1 MiB 应用预算和平台上限约束；ESA 另受 9 秒首数据、115 秒总时长与每请求四次出站 fetch 限制，状态查询也计入。详见[平台预算](repo-docs/modules/platform-adapters.md#平台预算怎样影响请求)。
+
 上游错误与 SSE 元信息会脱敏，正常模型文本及签名保持原值。客户端取消会传播到上游连接，但不能据此认定上游已停止计算或计费。向量输出校验数量、索引、维度和编码，无效结果返回 502 且不换账号重复生成。更多说明见[上游与配额](repo-docs/modules/upstream-and-quota.md)。
 
 ## 本地验证与贡献
 
-回归测试需要 Node.js 24+、Python 3.10+ 和 Git，无需根目录 npm 安装。测试使用模拟上游与存储；Python 和 Git 用于临时仓库中的维护护栏测试。
+回归测试需要 Node.js 24+、Python 3.10+ 和 Git，无需根目录 npm 安装。模型上游与 DO/KV 使用模拟；自建状态另以真实临时 SQLite、独立进程和本地 HTTP 验证。Python 和 Git 用于临时仓库中的维护护栏测试。
 
 ```sh
 node --test tests/*.test.mjs
