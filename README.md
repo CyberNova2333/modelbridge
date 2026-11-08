@@ -34,8 +34,6 @@
 ![管理页面](img/2.png)
 
 
-> 📐 **交互式架构图表**：支持动态探查、缩放平移与主题切换的高保真架构图：[多平台边缘计算适配矩阵图](https://cybernova2333.github.io/modelbridge/diagrams/modelbridge-architecture.html)。
-
 ## 阅读路径
 
 | 读者目标 | 从这里开始 | 读完后获得什么 |
