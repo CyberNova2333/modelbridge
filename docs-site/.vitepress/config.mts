@@ -7,6 +7,7 @@ const pages = {
   "README.md": "",
   "glossary.md": "glossary",
   "modules/access-and-config.md": "modules/access-and-config",
+  "modules/platform-adapters.md": "modules/platform-adapters",
   "modules/routing-and-protocols.md": "modules/routing-and-protocols",
   "modules/upstream-and-quota.md": "modules/upstream-and-quota",
   "references/quality-review.md": "references/quality-review",
@@ -51,6 +52,10 @@ export default {
   {
     "text": "访问与配置",
     "link": "/modules/access-and-config"
+  },
+  {
+    "text": "多平台部署",
+    "link": "/modules/platform-adapters"
   },
   {
     "text": "路由与协议",
