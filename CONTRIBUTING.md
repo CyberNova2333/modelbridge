@@ -13,16 +13,16 @@ For a protocol fix, reproduce the failure with a mocked upstream, change the ada
 | 改动 / Change | 验证入口 / Verification |
 | --- | --- |
 | Worker 行为 / Worker behavior | `node --check _worker.js`；`node --test tests/*.test.mjs` |
-| 平台适配与部署产物 / Platform adapters and deployment artifacts | `npm run check`；`npm run build`；完整回归 / full regression suite。真实平台验收单列 / report real platform acceptance separately |
+| 平台适配与部署产物 / Platform adapters and deployment artifacts | `pnpm run check`；`pnpm run build`；完整回归 / full regression suite。真实平台验收单列 / report real platform acceptance separately |
 | 自建状态、迁移与备份 / Self-hosted state, migration and backup | `node --test tests/sqlite-state.test.mjs tests/self-hosted-server.test.mjs tests/self-hosted-platforms.test.mjs tests/state-admin.test.mjs`；磁盘恢复、TLS 和云端验收另列 / separately verify deployment storage, recovery, TLS and cloud behavior |
-| 部署验收工具 / Deployment verification tools | 显式运行 `npm run verify:container`、`npm run verify:tls -- --state-image <image>`、`npm run verify:edge-builds`；需要 Docker/厂商 CLI，不在默认回归中下载或启动 / opt-in Docker and CLI checks, separate from default regression |
-| 文档内容 / Documentation content | 核对源码、链接与示例；`npm --prefix docs-site run docs:build` / Check source, links and examples; build the documentation site |
-| 文档站配置与依赖 / Documentation site configuration and dependencies | `npm --prefix docs-site audit --audit-level=moderate`；`npm --prefix docs-site run test:smoke`；文档站构建 / site build |
+| 部署验收工具 / Deployment verification tools | 显式运行 `pnpm run verify:container`、`pnpm run verify:tls -- --state-image <image>`、`pnpm run verify:edge-builds`；需要 Docker/厂商 CLI，不在默认回归中下载或启动 / opt-in Docker and CLI checks, separate from default regression |
+| 文档内容 / Documentation content | 核对源码、链接与示例；`pnpm --dir docs-site run docs:build` / Check source, links and examples; build the documentation site |
+| 文档站配置与依赖 / Documentation site configuration and dependencies | `pnpm --dir docs-site audit --audit-level=moderate`；`pnpm --dir docs-site run test:smoke`；文档站构建 / site build |
 | 提交护栏 / Maintenance guard | `node --test tests/repo-maintenance-guard.test.mjs`；核对下文安装状态 / inspect the installation status below |
 
-业务回归需要 Node.js 24+、Python 3.10+ 和 Git，不需要根目录 npm 依赖，使用模拟上游和临时 Git 仓库。首次构建文档站先运行 `npm --prefix docs-site ci`。文档站烟测自行启动临时本地开发服务器；不要改动现有运行服务来检查文档。模拟测试、真实账号权限、持久化与生产验收分别报告，不用一次聊天成功代表所有协议兼容。
+业务回归需要 Node.js 24+、Python 3.10+ 和 Git，不需要根目录 npm 依赖，使用模拟上游和临时 Git 仓库。首次构建文档站先运行 `pnpm --dir docs-site install --frozen-lockfile`。文档站烟测自行启动临时本地开发服务器；不要改动现有运行服务来检查文档。模拟测试、真实账号权限、持久化与生产验收分别报告，不用一次聊天成功代表所有协议兼容。
 
-Regression tests require Node.js 24+, Python 3.10+ and Git, with no root npm install. They use mocked upstreams and temporary Git repositories. Run `npm --prefix docs-site ci` before the first documentation build. The site smoke test starts its own temporary local development server; do not change an existing service to validate documentation. Report mocked tests, real account permissions, persistence and production acceptance separately.
+Regression tests require Node.js 24+, Python 3.10+ and Git, with no root pnpm install. They use mocked upstreams and temporary Git repositories. Run `pnpm --dir docs-site install --frozen-lockfile` before the first documentation build. The site smoke test starts its own temporary local development server; do not change an existing service to validate documentation. Report mocked tests, real account permissions, persistence and production acceptance separately.
 
 用户可见的输入、输出或拒绝条件变化，同步主走读和对应概念页；责任位置变化，同步代码地图；有意义的指南调整记入 `repo-docs/change-log.md`，附实际验证和 `Synced through <sha>`。保留未提交工作；发布、推送与部署按 [AGENTS.md](AGENTS.md) 取得明确授权。
 

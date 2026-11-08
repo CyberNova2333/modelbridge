@@ -109,11 +109,11 @@
 | 重要代码 | 功能 | 关键符号 | 调用方 / 使用方 |
 | --- | --- | --- | --- |
 | [离线护栏](../tools/repo_maintenance_guard.py) | 读取索引和历史 Git 对象，检查标题与敏感内容 | `staged / pushed / revoked_exception_paths / ObjectBatch` | Git hooks 和隔离回归 |
-| [平台构建器](../tools/build-platforms.mjs) | 无依赖生成六个部署项目，拒绝覆盖无关文件与链接路径 | `buildPlatforms` | 根 `npm run build`、产物测试、CI |
+| [平台构建器](../tools/build-platforms.mjs) | 无依赖生成六个部署项目，拒绝覆盖无关文件与链接路径 | `buildPlatforms` | 根 `pnpm run build`、产物测试、CI |
 | [状态维护](../tools/state-admin.mjs) | 受认证导出、空库导入、一致性备份；拒绝覆盖目标 | `exportRemoteConfig / importConfigFile / backupStateDatabase` | 离线迁移及备份 |
-| [容器验收](../tools/verify-self-hosted-container.mjs) | 实际构建模板，检查私网运行、权限、重启及新卷恢复 | `verifySelfHostedContainer` | 显式 `npm run verify:container` |
-| [TLS 验收](../tools/verify-state-tls.mjs)、[容器内客户端](../tools/verification/state-tls-client.mjs) | 验证内部 CA 证书链、主机名、RPC 认证与撤销；按标签清理资源 | `verifyStateTls`、`tools/verification/` 夹具 | 显式 `npm run verify:tls` |
-| [厂商 CLI 检查](../tools/verify-edge-builds.mjs) | 隔离官方 CLI，记录本地打包和 workerd 路由证据及未验证平台 | `CLI_VERSIONS / verifyEdgeBuilds` | 显式 `npm run verify:edge-builds` |
+| [容器验收](../tools/verify-self-hosted-container.mjs) | 实际构建模板，检查私网运行、权限、重启及新卷恢复 | `verifySelfHostedContainer` | 显式 `pnpm run verify:container` |
+| [TLS 验收](../tools/verify-state-tls.mjs)、[容器内客户端](../tools/verification/state-tls-client.mjs) | 验证内部 CA 证书链、主机名、RPC 认证与撤销；按标签清理资源 | `verifyStateTls`、`tools/verification/` 夹具 | 显式 `pnpm run verify:tls` |
+| [厂商 CLI 检查](../tools/verify-edge-builds.mjs) | 隔离官方 CLI，记录本地打包和 workerd 路由证据及未验证平台 | `CLI_VERSIONS / verifyEdgeBuilds` | 显式 `pnpm run verify:edge-builds` |
 | [提交前钩子](../tools/repo_maintenance_hooks/pre-commit)、[消息钩子](../tools/repo_maintenance_hooks/commit-msg)、[推送钩子](../tools/repo_maintenance_hooks/pre-push) | 串联原钩子与补充检查，失败阻止操作 | 对应 guard 子命令 | 本机 Git 操作 |
 
 安装与提交说明由[贡献指南](../CONTRIBUTING.md)维护，扫描边界由[安全说明](../SECURITY.md)维护。护栏是补充检查，不能证明业务正确或所有凭证都已识别。
@@ -131,7 +131,7 @@
 
 | 重要代码 | 功能 | 关键符号 | 调用方 / 使用方 |
 | --- | --- | --- | --- |
-| [包配置](../docs-site/package.json)、[锁文件](../docs-site/package-lock.json) | 文档依赖与开发、构建、冒烟命令 | `docs:build / test:smoke / overrides` | npm 与文档 CI |
+| [包配置](../docs-site/package.json)、[锁文件](../docs-site/pnpm-lock.yaml) | 文档依赖与开发、构建、冒烟命令 | `docs:build / test:smoke / overrides` | npm 与文档 CI |
 | [站点配置](../docs-site/.vitepress/config.mts) | 导航、搜索虚拟模块兼容及页面路由 | `pages / localSearchIds / themeConfig` | VitePress |
 | [链接处理](../docs-site/.vitepress/guide-links.mts) | 把指南链接改为站点路由，源码链接显示精确路径 | `guideLinks` | Markdown 构建 |
 | [主题入口](../docs-site/.vitepress/theme/index.ts) | 使用 VitePress 默认主题 | `DefaultTheme` | 站点展示，与业务界面独立 |

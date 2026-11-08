@@ -8,9 +8,9 @@
 | --- | --- |
 | 回归测试 | `node --test tests/*.test.mjs`（Node.js 24+、Python 3.10+、Git；模拟上游，不需 npm 依赖安装） |
 | 多平台产物 | `node tools/build-platforms.mjs`（只生成 `dist/` 下部署项目，不发布） |
-| 自建状态服务 | `npm run start:state`（Node.js 24+、本地 SQLite；先设置环境及 HTTPS 反代，不默认暴露公网） |
-| 本地部署验收 | `npm run verify:container`；`npm run verify:tls -- --state-image <image>`；`npm run verify:edge-builds`（显式运行，需 Docker/下载固定 CLI；不发布） |
-| 开发 | `npx wrangler dev`（先核对本地绑定/Secret，可能占用端口） |
+| 自建状态服务 | `pnpm run start:state`（Node.js 24+、本地 SQLite；先设置环境及 HTTPS 反代，不默认暴露公网） |
+| 本地部署验收 | `pnpm run verify:container`；`pnpm run verify:tls -- --state-image <image>`；`pnpm run verify:edge-builds`（显式运行，需 Docker/下载固定 CLI；不发布） |
+| 开发 | `pnpm dlx wrangler dev`（先核对本地绑定/Secret，可能占用端口） |
 
 ## 约束
 

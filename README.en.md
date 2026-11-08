@@ -71,8 +71,8 @@ For new deployments, use the [self-hosted state service and platform entries](re
 Install Node.js 24+, sign in to your own Cloudflare account with Wrangler, and create a KV namespace:
 
 ```sh
-npx wrangler login
-npx wrangler kv namespace create KV
+pnpm dlx wrangler login
+pnpm dlx wrangler kv namespace create KV
 ```
 
 The checked-in `wrangler.toml` retains the maintainer's deployment settings. Change the following for a new instance; preserve the existing storage bindings when upgrading:
@@ -96,8 +96,8 @@ id = "YOUR_KV_NAMESPACE_ID"
 Retain the `global_fetch_strictly_public` and `enable_request_signal` compatibility flags, and `observability.redact_query_string = true`. The [compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/) route global fetch through the public Internet path instead of a shortcut to the Worker's own zone origin, and enable incoming request cancellation signals. The [logging setting](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/) removes query strings from request URLs in logs and traces. Public routing is not a complete private-network firewall.
 
 ```sh
-npx wrangler deploy
-npx wrangler secret put ADMIN_PASSWORD
+pnpm dlx wrangler deploy
+pnpm dlx wrangler secret put ADMIN_PASSWORD
 ```
 
 The `ADMIN_PASSWORD` administrator Secret is required: access is blocked without it. Existing deployments do not need to set it again during upgrades. Never put passwords or upstream credentials in `wrangler.toml`.
@@ -125,7 +125,7 @@ Keep Pages and its hosting Worker on the same code version. Upgrade the Worker f
 
 ### Self-hosted state + Cloudflare / EdgeOne Makers / Alibaba Cloud ESA
 
-Generate deployment projects with Node.js 24+, without installing root npm dependencies:
+Generate deployment projects with Node.js 24+, without installing root pnpm dependencies:
 
 ```sh
 node tools/build-platforms.mjs
@@ -190,7 +190,7 @@ Select Antigravity in account management and paste the email and `refresh_token`
 Environment Secrets are also supported:
 
 ```sh
-npx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
+pnpm dlx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
 ```
 
 Optional settings include `ANTIGRAVITY_PROJECT_ID` and `ANTIGRAVITY_EMAIL`. Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` together; account-level settings take precedence. For multiple environment accounts, use the `ANTIGRAVITY_ACCOUNTS` JSON array described in [Upstreams and quota](repo-docs/modules/upstream-and-quota.md). Legacy `ya29.` Access Tokens work but cannot renew themselves.
@@ -241,7 +241,7 @@ Upstream errors and SSE metadata are sanitized; ordinary model text and signatur
 
 ## Local verification and contribution
 
-Regression tests need Node.js 24+, Python 3.10+ and Git, with no root npm installation. Model upstreams and DO/KV are mocked; self-hosted state also uses real temporary SQLite databases, independent processes and loopback HTTP. Python and Git exercise the maintenance guard in temporary repositories.
+Regression tests need Node.js 24+, Python 3.10+ and Git, with no root pnpm installation. Model upstreams and DO/KV are mocked; self-hosted state also uses real temporary SQLite databases, independent processes and loopback HTTP. Python and Git exercise the maintenance guard in temporary repositories.
 
 ```sh
 node --test tests/*.test.mjs
@@ -256,13 +256,13 @@ See [Contributing](CONTRIBUTING.md) for fresh-clone guard installation, the Comm
 The Chinese guide lives in `repo-docs/` and is included by VitePress pages using the default theme. Install documentation dependencies separately:
 
 ```sh
-npm --prefix docs-site ci
-npm --prefix docs-site run docs:build
+pnpm --dir docs-site install --frozen-lockfile
+pnpm --dir docs-site run docs:build
 ```
 
 Output defaults to `docs-site/.vitepress/dist/`. Append `-- --outDir <external-absolute-directory>` for an isolated build. Source links display precise repository paths; source files and local resources are not copied into the site.
 
-For local preview, use `npm --prefix docs-site run docs:dev -- --host 127.0.0.1`. The `npm --prefix docs-site run test:smoke` command starts a temporary local service to check initial search, Markdown HMR and file-access boundaries. VitePress 1.6.4 requires a development-server restart to refresh the search index; static builds regenerate it. Dependency versions and security patches are defined by the [documentation package](docs-site/package.json) and lockfile.
+For local preview, use `pnpm --dir docs-site run docs:dev -- --host 127.0.0.1`. The `pnpm --dir docs-site run test:smoke` command starts a temporary local service to check initial search, Markdown HMR and file-access boundaries. VitePress 1.6.4 requires a development-server restart to refresh the search index; static builds regenerate it. Dependency versions and security patches are defined by the [documentation package](docs-site/package.json) and lockfile.
 
 ## Upstream updates
 
