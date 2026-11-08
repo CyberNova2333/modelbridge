@@ -1,0 +1,25 @@
+name = "modelbridge"
+main = "_worker.js"
+compatibility_date = "2026-06-30"
+compatibility_flags = ["global_fetch_strictly_public", "enable_request_signal"]
+workers_dev = true
+preview_urls = false
+
+[[kv_namespaces]]
+binding = "KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[[durable_objects.bindings]]
+name = "CONFIG_STORE"
+class_name = "AppConfigStore"
+
+[[migrations]]
+tag = "app-config-v1"
+new_sqlite_classes = ["AppConfigStore"]
+
+# Set ADMIN_PASSWORD with Wrangler Secrets, never as a plaintext var here.
+[observability]
+redact_query_string = true
+
+[observability.logs]
+enabled = false

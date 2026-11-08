@@ -2,6 +2,14 @@
 .wrangler/
 .playwright-mcp/
 .dev.vars
+dist/
+.env
+.env.*
+!.env.example
+/data/
+/private-state/
+*.sqlite
+*.sqlite-*
 
 # Dependency directories
 node_modules/

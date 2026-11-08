@@ -1,0 +1,6 @@
+{
+  "name": "modelbridge-esa",
+  "entry": "./worker.js",
+  "installCommand": "",
+  "buildCommand": ""
+}

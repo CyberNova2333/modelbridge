@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!package.json
+!_worker.js
+!src/
+!src/**
+!tools/
+!tools/**

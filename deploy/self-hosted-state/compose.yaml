@@ -1,0 +1,43 @@
+services:
+  state:
+    build: .
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8788"
+      DB_PATH: /data/modelbridge.sqlite
+      MODELBRIDGE_STATE_PUBLIC_ORIGIN: https://${STATE_DOMAIN:?Set the HTTPS state-service domain}
+      MODELBRIDGE_STATE_ORIGINS: ${MODELBRIDGE_STATE_ORIGINS:?Set exact gateway HTTPS origins}
+      MODELBRIDGE_STATE_TOKEN_FILE: /run/secrets/state_token
+    secrets: [state_token]
+    volumes:
+      - state_data:/data
+    # No host port mapping: only Caddy on the private Compose network can reach it.
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [state]
+    environment:
+      STATE_DOMAIN: ${STATE_DOMAIN:?Set the HTTPS state-service domain}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+secrets:
+  state_token:
+    file: ${STATE_TOKEN_FILE:?Set an absolute path to the private token file}
+
+volumes:
+  state_data:
+  caddy_data:
+  caddy_config:

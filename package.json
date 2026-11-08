@@ -1,0 +1,18 @@
+{
+  "name": "modelbridge",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "node tools/build-platforms.mjs",
+    "start:state": "node src/self-hosted/server.mjs",
+    "state:admin": "node tools/state-admin.mjs",
+    "verify:container": "node tools/verify-self-hosted-container.mjs",
+    "verify:tls": "node tools/verify-state-tls.mjs",
+    "verify:edge-builds": "node tools/verify-edge-builds.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "node --check _worker.js && node --check tools/build-platforms.mjs && node --check tools/state-admin.mjs && node --check src/self-hosted/server.mjs && node --check src/state/sqlite.mjs && node --check tools/verify-self-hosted-container.mjs && node --check tools/verify-state-tls.mjs && node --check tools/verification/state-tls-client.mjs && node --check tools/verify-edge-builds.mjs"
+  }
+}

@@ -1,0 +1,27 @@
+{
+    admin off
+    # The state RPC needs only HTTP/1.1; keep HTTP/2 and HTTP/3 disabled.
+    servers {
+        protocols h1
+    }
+}
+
+{$STATE_DOMAIN} {
+    @state {
+        path /_modelbridge/state
+        method POST
+    }
+    handle @state {
+        reverse_proxy state:8788 {
+            # A timed-out mutation may already have committed. Never retry it.
+            lb_retries 0
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 20s
+            }
+        }
+    }
+    handle {
+        respond 404
+    }
+}
