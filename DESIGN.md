@@ -1,7 +1,7 @@
 ---
-version: 2.0.0
-name: ModelBridge Primer Tactile Design System
-description: 面向边缘多源 LLM 路由与模型网关（modelbridge）的 Primer 质感设计系统规范。基于 GitHub Primer 功能原语与服务器刀片插槽物理质感，定义公共 API 门户页、多供应商账号池管理后台（Cloudflare / OpenAI / Anthropic / Gemini / OAuth）、流式响应遥测与四态错误诊断页的物理交互契约。
+version: 1.0.0
+name: ModelBridge Primer Design System
+description: 面向边缘多源 LLM 路由与模型网关（modelbridge）的 Primer 设计系统规范。与 CloudForge 同色系同风格，基于 GitHub Primer 功能原语定义公共 API 门户页、多供应商账号池管理后台（Cloudflare / OpenAI / Anthropic / Gemini / OAuth）以及四态错误诊断页的视觉与交互契约。
 colors:
   primary: '#0969da'
   accent-fg: '#0969da'
@@ -118,56 +118,55 @@ components:
     padding: '{spacing.xxs}'
 ---
 
-# ModelBridge 质感设计系统规范 (`DESIGN.md`)
+# ModelBridge Primer 设计系统规范 (`DESIGN.md`)
 
-本文档是 [`modelbridge`](file:///D:/Projects/CyberNova2333/git-repos/modelbridge) 的设计系统规范。针对边缘多源大模型中继、上游供应商账号池管理与流式可观测性，基于 GitHub Primer 功能原语融合**模型中继矩阵与服务器刀片物理质感（Model Transit Matrix & Server Blade Tactile Materiality）**，定义网关控制台与遥测面板的物理交互规范。
-
----
-
-## 1. 核心设计哲学与物理质感
-
-1. **服务器刀片插槽质感（Blade Slot Materiality）**：
-   - 供应商账号卡片（`.stat-card` / 供应商池表格）呈现模块化机箱插槽视觉：`1px solid var(--border-color)` 物理边框、顶边缘斜角反光（`box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(1, 4, 9, 0.4)`）。
-   - 账号激活状态胶囊带有物理凹凸感，模拟插槽锁定拉手与接触点。
-2. **流式数据脉冲遥测（Stream Pulse Respiration）**：
-   - SSE 流式活动指示灯（`.pulse-indicator`）具备物理 LED 呼吸光晕与微透镜效果（微扩散半径 `0 0 8px rgba(63, 185, 80, 0.4)`），提供直观的数据流吞吐律动。
-   - 响应延迟仪表条采用物理凹槽导轨设计，呈现拉丝金属质感底槽。
-3. **触觉开关与微按压反馈（Tactile Kinematics）**：
-   - 所有按钮与测试连接控件具备物理按压三态反馈（`:hover` `translateY(-0.5px)`，`:active` `translateY(0.5px) scale(0.99)` + `inset 0 2px 4px rgba(0, 0, 0, 0.25)`）。
+本文档是 [`modelbridge`](file:///D:/Projects/CyberNova2333/git-repos/modelbridge) 的设计系统规范，与 [`cloudforge/DESIGN.md`](file:///D:/Projects/CyberNova2333/git-repos/cloudforge/DESIGN.md) 保持**同色系同风格（GitHub Primer Functional Design System）**，指导 [`_worker.js`](file:///D:/Projects/CyberNova2333/git-repos/modelbridge/_worker.js) 内嵌的四个核心 Web 视图（公共门户 `handleLandingPage`、管理后台 `handleAdminPage`、存储未绑定诊断页 `handleKVError`、密码未配置诊断页 `handlePasswordError`）的样式与交互实现。
 
 ---
 
-## 2. 调色板与语义 Token
+## Overview
 
-### 2.1 W3C `$value/$type` Token 注册表
+1. **Productive Complexity（高密度网关可观测性）**：ModelBridge 管理多协议（OpenAI `/v1/chat/completions`、Anthropic `/v1/messages`、Gemini `/v1beta`）、多上游供应商账号池与模型别名映射。通过 `14px` 正文锚点、`12px` 等宽端点/模型 ID、Primer `Box`（`1px solid` 边框 + `6px` 圆角）与紧凑表格呈现高密度运维信息。
+2. **Strict Nonce CSP & Self-Contained Safety（严格 CSP 与自包含安全）**：所有内联 `<style>` 与 `<script>` 必须绑定单次请求生成的 `nonce="${nonce}"`，零外部 CDN 依赖；已保存的上游凭据在表格与编辑态中一律掩码为 `********`。
+3. **Pragmatic Visuals（务实视觉）**：使用 `canvas.inset`（`#f6f8fa` Light / `#010409` Dark）作为顶栏与管理侧边栏底色，`canvas.default`（`#ffffff` / `#0d1117`）作为主工作区与 `Box` 底色，`canvas.subtle`（`#f6f8fa` / `#161b22`）作为表头与卡片头部底色。拒绝廉价渐变、发光阴影与悬浮位移。
+4. **Consistency through Primitives（原语驱动的一致性）**：Light 与 Dark 双模式通过切换根级 Primer 功能变量实现无缝过渡。
 
-| Primer 功能 Token | `_worker.js` 变量映射 | Light `$value` | Dark `$value` | 物理映射与用途 |
+---
+
+## Colors
+
+### W3C `$value/$type` Token 注册表
+
+| Primer 功能 Token | `_worker.js` 变量映射 | Light `$value` | Dark `$value` | 用途与组件绑定 |
 | :--- | :--- | :--- | :--- | :--- |
-| `accent.fg` | `--accent-color` | `#0969da` | `#2f81f7` | 协议端点链接、选中的供应商 Tab、2px 物理焦点环 |
-| `accent.emphasis` | `--btn-primary-bg` | `#0969da` | `#1f6feb` | Primary 主按钮填充（保存配置、新增账号） |
-| `accent.subtle` | `--accent-subtle` | `#ddf4ff` | `rgba(56,139,253,0.15)` | 协议胶囊底色、活跃数据流高亮 |
-| `canvas.default` | `--bg-canvas` / `--bg-card` | `#ffffff` | `#0d1117` | 主工作区底色、插槽卡片表面 |
-| `canvas.inset` | `--bg-inset` | `#f6f8fa` | `#010409` | 顶栏机箱底座、侧边导轨底色、代码块内凹槽 |
-| `canvas.subtle` | `--bg-subtle` / `--bg-table-head` | `#f6f8fa` | `#161b22` | 卡片表头、次要按钮底板 |
-| `fg.default` | `--text-main` | `#1f2328` | `#f0f6fc` | 主要端点数据、配置文本 |
-| `fg.muted` | `--text-muted` | `#57606a` | `#8b949e` | 字段说明、毫秒延迟、Token 统计计数 |
-| `border.default` | `--border-color` | `#d0d7de` | `#30363d` | 容器物理边框（1px solid） |
-| `success.fg` | `--color-success` | `#1a7f37` | `#3fb950` | 正常在线 LED 灯、流式数据通道畅通 |
-| `attention.fg` | `--color-warning` | `#9a6700` | `#d29922` | 速率限制、余额预警指示灯 |
-| `danger.fg` | `--color-danger` | `#cf222e` | `#f85149` | 认证失效、上游 5xx 故障红灯 |
+| `accent.fg` | `--accent-color` | `#0969da` | `#2f81f7` | 端点链接、激活侧栏导航、焦点环、复制高亮 |
+| `accent.emphasis` | `--btn-primary-bg` | `#0969da` | `#1f6feb` | Primary 主按钮填充（保存配置、新增账号、登录） |
+| `accent.subtle` | `--accent-subtle` | `#ddf4ff` | `rgba(56,139,253,0.15)` | 激活导航项背景、代码块协议徽章底色 |
+| `canvas.default` | `--bg-canvas` / `--bg-card` | `#ffffff` | `#0d1117` | 主工作区画布、`.stat-card` 与 `.section-card` `Box` 主体底色 |
+| `canvas.inset` | `--bg-inset` | `#f6f8fa` | `#010409` | 顶部栏（`.site-header`）、管理后台左侧导航栏（`aside`）、代码块底色 |
+| `canvas.subtle` | `--bg-subtle` / `--bg-table-head` | `#f6f8fa` | `#161b22` | `Box` 头部、表格 `<thead>`、次要按钮与列表项底色 |
+| `fg.default` | `--text-main` | `#1f2328` | `#f0f6fc` | 标题、表格主数据、表单输入文字 |
+| `fg.muted` | `--text-muted` | `#57606a` | `#8b949e` | 辅助说明、表头列名、字段提示、页脚 |
+| `border.default` | `--border-color` | `#d0d7de` | `#30363d` | 所有 `.stat-card`、`.section-card`、`.error-card`、输入框与按钮的 `1px solid` 边框 |
+| `border.muted` | `--border-muted` | `#d8dee4` | `#21262d` | 表格行间分隔线、列表项内部分隔线 |
+| `success.fg` | `--color-success` | `#1a7f37` | `#3fb950` | 账号 `active` 状态徽章、服务在线圆点、测试连接通过 |
+| `attention.fg` | `--color-warning` | `#9a6700` | `#d29922` | 额度预警、配置未初始化提示横幅 |
+| `danger.fg` | `--color-danger` | `#cf222e` | `#f85149` | 账号异常/禁用、删除按钮、500/503 错误诊断页状态标示 |
 
 ---
 
-## 3. 字体栈与空间规范
+## Typography & Layout
 
-- **系统排版字体栈（`--font-sans`）**：`-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif`
-- **等宽数据字体栈（`--font-mono`）**：`ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', 'IBM Plex Mono', monospace`
-- **基准字阶**：全局正文 `14px`，卡片标题 `16px`，端点路径、密钥掩码与 JSON 载荷统一使用 `12px` 等宽字体与 `font-variant-numeric: tabular-nums`。
+1. **字阶体系**：
+   - `body` 强制为 **`14px`**（`line-height: 1.5`）；页面主标题 `20px`（`font-weight: 600`）；区块标题 `16px`（`font-weight: 600`）；端点路径、模型 ID、API 密钥掩码与 JSON 示例统一使用 **`12px`** 等宽字体（`--font-mono`）与 `font-variant-numeric: tabular-nums`。
+2. **Primer `Box` 与双栏管理壳层**：
+   - **公共门户页（`/`）**：顶部 `canvas.inset` 导航栏 + `1200px` 居中主容器，包含网关概览 `Box`、三协议快速接入示例 `Box` 与实时可用模型检索表 `Box`。
+   - **管理控制台（`/admin`）**：左侧 `240px` `canvas.inset` 垂直导航轨（`aside`，`border-right: 1px solid var(--border-color)`）+ 右侧 `canvas.default` 滚动工作区，所有数据块均封装在 `6px` 圆角、`1px solid var(--border-color)` 的 `.section-card` / `.stat-card` 中。
+   - **错误诊断视图（`handleKVError` / `handlePasswordError`）**：居中 `640px` Primer `Box` 诊断卡，顶部带语义状态条与等宽配置指引步骤。
 
 ---
 
-## 4. 核心组件与安全约束
+## Do's and Don'ts
 
-1. **CSP Nonce 契约**：所有内联样式与脚本必须严格附带请求一次性 `nonce="${nonce}"`，不引入任何未授权外部资产。
-2. **凭据物理掩码**：API Key 等敏感资产在界面与表格中强制展示为固定长度掩码 `********`，防止截屏泄露。
-3. **错误诊断卡（Error Diagnostics）**：KV 未绑定或密码未配置时展示居中 `640px` 物理诊断卡，具备物理边框、等宽错误码与修复步骤提示。
+- ✅ **Do**：所有卡片、表格、按钮与输入框使用 `1px solid var(--border-color)` 与 `6px` 圆角；状态徽章使用 `9999px` 胶囊圆角。
+- ❌ **Don't**：严禁在 `:root` 中将画布或正文设为蓝色，严禁追加冲突的覆盖 `<style>` 块，严禁破坏 `_worker.js` 的 CSP `nonce` 或 DOM ID 契约。
