@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CyberNova2333/cybernova-homepage/main/public/schemas/repo-meta.v1.json",
+  "schemaVersion": 1,
+  "slug": "modelbridge",
+  "name": "ModelBridge · 模桥",
+  "title": {
+    "zh": "ModelBridge · 模桥 — 多协议 LLM API 转发与路由工具",
+    "en": "ModelBridge · Multi-Protocol LLM API Proxy & Router"
+  },
+  "visibility": "public",
+  "status": "active",
+  "category": "ai-agent",
+  "featured": true,
+  "order": 5,
+  "repository": "https://github.com/CyberNova2333/modelbridge",
+  "homepage": "https://cybernova2333.github.io/modelbridge/",
+  "docsUrl": "https://cybernova2333.github.io/modelbridge/docs/",
+  "license": "GPL-3.0-only",
+  "primaryLanguage": "JavaScript",
+  "techStack": [
+    "Cloudflare Workers",
+    "Node.js 24",
+    "SQLite",
+    "OpenAI API",
+    "Anthropic API",
+    "Gemini API"
+  ],
+  "tags": [
+    "llm-gateway",
+    "openai-compatible",
+    "anthropic",
+    "gemini",
+    "cloudflare-workers"
+  ],
+  "summary": {
+    "zh": "用于统一转发 OpenAI、Anthropic 与 Gemini 接口格式的 LLM API 路由小工具，可部署在 Cloudflare Workers 或配合本地 Node.js + SQLite 状态服务使用。",
+    "en": "LLM API proxy and router supporting OpenAI, Anthropic, and Gemini API formats across Cloudflare Workers or a self-hosted Node.js + SQLite state backend."
+  },
+  "highlights": {
+    "zh": [
+      "提供 OpenAI、Anthropic 与 Gemini 三种常见接口格式的请求转换，尽量保留工具调用与思考字段",
+      "状态存储可选用 Cloudflare Durable Objects 或自建的 Node.js 24 + SQLite 服务，并提供多平台打包脚本",
+      "带一个简单的网页管理面板，用于配置上游账号轮询、模型别名映射与配额统计"
+    ],
+    "en": [
+      "Translates between OpenAI, Anthropic, and Gemini API formats while preserving tool calls and thinking fields",
+      "Works with either Cloudflare Durable Objects or a self-hosted Node.js 24 + SQLite state service",
+      "Includes a web admin panel for configuring upstream key rotation, model aliases, and usage limits"
+    ]
+  },
+  "quickStart": [
+    "node --test tests/*.test.mjs",
+    "node tools/build-platforms.mjs",
+    "pnpm run start:state"
+  ],
+  "roadmap": {
+    "stage": "日常维护",
+    "stageEn": "Maintained",
+    "milestone": {
+      "zh": "三类接口协议转换、多平台打包脚本与 SQLite 状态服务均已完成。",
+      "en": "Protocol conversion, platform build scripts, and SQLite state service are complete."
+    }
+  },
+  "updatedAt": "2026-11-11"
+}
