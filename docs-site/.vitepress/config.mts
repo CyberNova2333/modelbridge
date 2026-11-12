@@ -1,7 +1,34 @@
 // VitePress 官方文档配置 (Coolify 架构风格 + 中英双语支持)
 import { defineConfig } from 'vitepress'
+import { guideLinks } from './guide-links.mts'
+
+const pages: Record<string, string> = {
+  "change-log.md": "change-log",
+  "code-map.md": "code-map",
+  "README.md": "",
+  "glossary.md": "glossary",
+  "modules/access-and-config.md": "modules/access-and-config",
+  "modules/platform-adapters.md": "modules/platform-adapters",
+  "modules/routing-and-protocols.md": "modules/routing-and-protocols",
+  "modules/upstream-and-quota.md": "modules/upstream-and-quota",
+  "references/quality-review.md": "references/quality-review",
+  "references/source-evidence.md": "references/source-evidence",
+  "walkthroughs/one-real-run.md": "walkthroughs/one-real-run"
+}
+
+const localSearchIds = ['/@localSearchIndex', '/@localSearchIndexroot']
 
 export default defineConfig({
+  markdown: { config: guideLinks(pages) },
+  vite: {
+    plugins: [{
+      name: 'vitepress-local-search-vite6-compat',
+      enforce: 'pre',
+      resolveId(id: string) {
+        if (localSearchIds.includes(id)) return id
+      },
+    }],
+  },
   cleanUrls: true,
   locales: {
     root: {
