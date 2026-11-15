@@ -120,7 +120,7 @@ components:
 
 # ModelBridge Primer 设计系统规范 (`DESIGN.md`)
 
-本文档是 [`modelbridge`](file:///D:/Projects/CyberNova2333/git-repos/modelbridge) 的设计系统规范，与 [`cloudforge/DESIGN.md`](file:///D:/Projects/CyberNova2333/git-repos/cloudforge/DESIGN.md) 保持**同色系同风格（GitHub Primer Functional Design System）**，指导 [`_worker.js`](file:///D:/Projects/CyberNova2333/git-repos/modelbridge/_worker.js) 内嵌的四个核心 Web 视图（公共门户 `handleLandingPage`、管理后台 `handleAdminPage`、存储未绑定诊断页 `handleKVError`、密码未配置诊断页 `handlePasswordError`）的样式与交互实现。
+本文档是 `modelbridge` 的设计系统规范，与同系列项目 `cloudforge` 的 Primer 规范保持**同色系同风格（GitHub Primer Functional Design System）**，指导 [`_worker.js`](_worker.js) 内嵌的四个核心 Web 视图（公共门户 `handleLandingPage`、管理后台 `handleAdminPage`、存储未绑定诊断页 `handleKVError`、密码未配置诊断页 `handlePasswordError`）的样式与交互实现。
 
 ---
 

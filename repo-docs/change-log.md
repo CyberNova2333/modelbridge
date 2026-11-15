@@ -233,3 +233,18 @@ Synced through 7dfba0f1a7890b983cbe39f399383f3aa18a3b8f；本节对应该基线�
 本轮没有复现新的越权、凭据串用或撤销复活路径；不能据此声称没有其他漏洞。16 MiB 边界回归验证存储、回滚与迁移正确性，不是生产容量压测。真实云端 Secret、SSE/断连、上游权限、生产磁盘恢复和吞吐仍待按部署环境验收。未提交、推送、部署或迁移生产状态，保留既有工作树与未启用的主题资源。
 
 Synced through 7dfba0f1a7890b983cbe39f399383f3aa18a3b8f；本节对应该基线后的第三轮审查工作树。
+
+## 2026-11-15 文档体系重置与双语文档站校准（Synced through `60592ed`）
+
+继 `a70bfee`（前端多语言自动重定向）、`ebc508b`（`meta.json`）与 `60592ed`（接入 `guideLinks` 与 Vite 6 本地搜索兼容插件）之后，本轮依据根目录 `_worker.js`、`src/`、`tools/`、`deploy/`、`wrangler.toml`、`cloudflare-model-map.json` 与 `tests/*.test.mjs` 对全仓文档体系实施“单一事实来源、分角色渐进导航”重置，未改动任何网关或状态服务业务源码：
+
+- **双语入口中枢重置**：重写根目录 `README.md` 与 `README.en.md`（严格 6 节架构，各 80 行），覆盖定位边界、6 节点 Mermaid 请求与配置流转图、4 行本地验证 Quick Start + 5 种运行/部署模式跳转表、4 项前置选型 FAQ、Reading Paths 路由表及 `AGPL-3.0-only` / WorkersAI2API MIT 来源声明。
+- **`docs-site/` Tier B 三阶段重构与虚构模板清理**：清理此前引入的不实通用模板页（`/docs/configuration`、`/docs/faq` 及其 `en/` 副本中虚构的 `@modelbridge/adapter-*`、`import { ModelBridge }` 与 `Ollama` 独立 provider 等描述），按三阶段重组 `.vitepress/config.mts` 中英文导航与侧栏：
+  1. `起步与配置部署`（`docs/index.md`、`docs/deployment-faq.md` 及 `en/` 对应页）：涵盖 Workers 原生 DO / `AppConfigStore`、Cloudflare Remote、EdgeOne Makers、阿里云 ESA、自建 Node.js 24 + SQLite（WAL）、`DB_PATH`/`HOST`/`PORT`/`MODELBRIDGE_STATE_*` 变量矩阵、65 条预设别名与排错 FAQ；
+  2. `接口与扩展契约`（`docs/contracts.md`、`docs/adapters.md` 及 `en/` 对应页）：涵盖四态凭据隔离、限额、自定义 `baseUrl` SSRF 校验、`resolveModelName` 优先级、`validateReplayMetadata`、`401/403/404/429` 有界切换与扩展指南；
+  3. `原理与源码导览（含决策迁移）`（`docs/architecture.md`、`docs/migrations.md` 及 `en/` 对应页）：保留 `/diagrams/modelbridge-architecture.html` 交互式全景图，汇总五项核心 ADR 与 `tools/state-admin.mjs` 迁移/热备份 Runbook。
+- **恢复 `repo-docs/` 站点映射与双语防 404 对称**：依据 `config.mts` 中既有的 `pages` 表补齐 `docs-site/` 下 10 份薄 `@include` 包装页（其中高密度审计台账 `change-log.md` 与 `references/*` 设 `search: false` 以维持 dev 模式本地搜索响应低于冒烟 `2 MiB` 预算），并配套补齐 10 份 `docs-site/en/` 英文伴随导览页以配合 `theme/i18n.ts` 语言重定向避免 404；完整保留 `.vitepress/theme/`、`.vitepress/guide-links.mts` 与 `public/diagrams/modelbridge-architecture.html`。
+- **文档规范与护栏校准**：清理 `DESIGN.md` 中的本机 Windows 绝对路径（`D:/...`）；更新 `repo-docs/README.md`、`repo-docs/code-map.md` 与 `repo-docs/modules/platform-adapters.md`（修正临时审计锁文件路径引用，消除不存在仓库路径告警）。
+
+Synced through 60592ed6f79b1739448c4fc544436a6a0dc9d01e。
+

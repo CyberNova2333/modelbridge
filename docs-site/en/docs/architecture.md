@@ -1,15 +1,12 @@
----
-title: System Architecture & Design
-description: Architectural design, component relationships, and runtime execution flow of ModelBridge Bus.
----
+# 3. Architecture & Code Tour
 
 ::: warning AI Translation Notice
-This document was translated by an AI language model. In case of any discrepancies or ambiguities, please refer to the [original Chinese documentation](/docs/architecture) as the authoritative reference.
+This page is an English translation of the [authoritative Chinese architecture guide](/docs/architecture). Refer to the Chinese version in case of discrepancies.
 :::
 
-# System Architecture & Design
+ModelBridge separates **shared gateway core logic** (`_worker.js`), **platform runtime adapters** (`src/platforms/`), **remote/SQLite state primitives** (`src/state/` & `src/self-hosted/`), and **packaging/admin tooling** (`tools/`).
 
-## Interactive Architecture Overview
+## Interactive Architecture Diagram
 
 <div class="archify-diagram-card" style="margin: 1.5rem 0; border: 1px solid var(--vp-c-border); border-radius: 12px; overflow: hidden; background: var(--vp-c-bg-soft); box-shadow: 0 4px 16px rgba(0,0,0,0.06);">
   <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px 18px; background: var(--vp-c-bg-elv); border-bottom: 1px solid var(--vp-c-border); font-size: 13px;">
@@ -23,18 +20,29 @@ This document was translated by an AI language model. In case of any discrepanci
   <iframe src="/diagrams/modelbridge-architecture.html" width="100%" height="520px" frameborder="0" style="display: block; border: none;" allowfullscreen loading="lazy"></iframe>
 </div>
 
----
+## Module Responsibilities & Source Guide Index
 
-## Core Design Principles
+| Module / Path | Responsibility | Source Reference |
+| :--- | :--- | :--- |
+| `_worker.js` | Portal/admin UI, 4-domain auth, `AppConfigStore` DO, routing, protocol translation, `fetchUpstream` | `repo-docs/walkthroughs/one-real-run.md` |
+| `src/platforms/` | `cloudflare.mjs`, `edgeone.mjs`, `esa.mjs`, `shared.mjs` (`PLATFORM_LIMITS` & `runPlatformRequest`) | `repo-docs/modules/platform-adapters.md` |
+| `src/state/` | `remote.mjs` (`2 MiB`/`16 MiB` RPC), `service.mjs` (DO RPC server), `sqlite.mjs` (WAL + `BEGIN IMMEDIATE`) | `repo-docs/modules/access-and-config.md` |
+| `src/self-hosted/server.mjs` | Node.js 24 state HTTP service (`127.0.0.1:8788`, `/_modelbridge/state`, strict origin/token checks) | `repo-docs/modules/platform-adapters.md` |
+| `tools/` | `build-platforms.mjs` (6 `dist/` bundles), `state-admin.mjs`, `verify-*.mjs`, `repo_maintenance_guard.py` | [Code Map & Module Reference](/en/code-map) |
 
-1. **Clear Layering & Single Responsibility**: Each module maintains explicit boundaries without cross-domain privilege escalation.
-2. **Security & Isolation First**: Protected secrets, sensitive credentials, and untrusted execution contexts are strictly decoupled.
-3. **Out-of-the-Box & Self-Contained**: Minimal external dependencies; core runtime guarantees deterministic behavior and rapid startup.
+> Detailed source-verified guides live in Chinese under `repo-docs/` in the repository; browse the English navigation stubs at [Source Guide Index](/en/walkthroughs/one-real-run) and [Code Map Reference](/en/code-map).
 
----
+## Contributor Workflow & Guards
 
-## Runtime Lifecycle & Data Flow
+```sh
+pnpm run check
+node --test tests/*.test.mjs
+node tools/build-platforms.mjs
+```
 
-- **Stage 1: Input Ingestion & Preflight Validation**: Accepts incoming calls, verifies schemas, and validates security parameters.
-- **Stage 2: Policy Arbitration & State Coordination**: Routes decisions based on configured security policies and runtime state.
-- **Stage 3: Controlled Execution & Persistent Receipting**: Executes operations within sandboxed boundaries and persists verifiable state.
+- Commits are checked by `tools/repo_maintenance_hooks` (`tools/repo_maintenance_guard.py`) for Conventional Commit subjects and accidental secret/local-path leakage. Never bypass hooks with `--no-verify`.
+- See `CONTRIBUTING.md` and `SECURITY.md` at the repository root for contribution and vulnerability disclosure policies.
+
+## Next Steps
+
+- Read key architectural decisions and the DO-to-SQLite migration runbook in [Architecture Decisions & Migrations](/en/docs/migrations).

@@ -12,7 +12,7 @@
 | `tests/` | 模拟上游，另用 SQLite/HTTP 实测持久化边界 | `*.test.mjs` | 检查正常及失败路径 |
 | `tools/` | 构建、迁移备份和离线维护护栏 | `build-platforms.mjs`、`state-admin.mjs`、`repo_maintenance_guard.py` | 交付及维护支线 |
 | `.github/workflows/` | 运行回归，验证并提议上游更新 | `test.yml`、`sync-upstream.yml` | 交付支线，不参与生成 |
-| `docs-site/` | 独立发布中文指南 | `.vitepress/`、页面 include、`tests/` | 文档支线，不参与业务请求 |
+| `docs-site/` | 提供中英双语分层使用文档并通过 include 复用本指南 | `.vitepress/`、`docs/`、`en/`、`tests/` | 文档支线，不参与业务请求 |
 | `assets/`、`img/` | 保存品牌图形和演示截图 | SVG、PNG | 展示资源，不参与模型路由 |
 
 ## `./`
@@ -39,7 +39,7 @@
 
 首页、后台侧栏与移动顶栏使用 `projectBrandMarkup` 和 `PROJECT_BRAND_CSS`；内嵌 `PROJECT_ICON_SVG` 通过数据地址用于品牌图片及页签图标。仓库的 [Logo](../assets/modelbridge-logo.svg) 和[方形图标](../assets/modelbridge-icon.svg)是独立素材，修改图形要同时核对内嵌版本。当前 Worker 没有 `/assets/` 静态路由，README 的图片链接不是线上下载地址。
 
-首页将页首品牌作为唯一一级标题，不再另设大标语；后台保留各功能页标题。中英文 README 均将带字 Logo 放在居中的唯一一级标题中，通过图片替代文字保留品牌名称，不再叠加文字标题；下方的静态徽章链接到许可证、部署、源码与协议说明，语言切换和文档导航同样居中。
+首页将页首品牌作为唯一一级标题，不再另设大标语；后台保留各功能页标题。中英文 README 均将带字 Logo 放在居中的唯一一级标题中，通过图片替代文字保留品牌名称，不再叠加文字标题；下方的静态徽章链接到许可证、部署、源码与协议说明，语言切换和阅读导航保持居中。`img/` 目录保留演示截图。
 
 ## `src/platforms/`
 
@@ -132,18 +132,18 @@
 | 重要代码 | 功能 | 关键符号 | 调用方 / 使用方 |
 | --- | --- | --- | --- |
 | [包配置](../docs-site/package.json)、[锁文件](../docs-site/pnpm-lock.yaml) | 文档依赖与开发、构建、冒烟命令 | `docs:build / test:smoke / overrides` | npm 与文档 CI |
-| [站点配置](../docs-site/.vitepress/config.mts) | 导航、搜索虚拟模块兼容及页面路由 | `pages / localSearchIds / themeConfig` | VitePress |
+| [站点配置](../docs-site/.vitepress/config.mts) | 中英双语三阶段导航、搜索虚拟模块兼容及页面路由 | `pages / localSearchIds / locales` | VitePress |
 | [链接处理](../docs-site/.vitepress/guide-links.mts) | 把指南链接改为站点路由，源码链接显示精确路径 | `guideLinks` | Markdown 构建 |
-| [主题入口](../docs-site/.vitepress/theme/index.ts) | 使用 VitePress 默认主题 | `DefaultTheme` | 站点展示，与业务界面独立 |
-| [页面包装](../docs-site/index.md)及对应子页 | include 读取唯一指南正文 | `repoGuideSource / @include` | Markdown 构建 |
+| [主题入口](../docs-site/.vitepress/theme/index.ts) | 扩展 VitePress 默认主题，提供语言切换与阅读模式切换 | `DefaultTheme / Layout / i18n` | 站点展示，与业务界面独立 |
+| [对外文档与页面包装](../docs-site/index.md)及子页 | 组织三阶段双语文档并通过 include 读取本指南正文 | `docs/ / en/ / repoGuideSource / @include` | Markdown 构建 |
 | [服务冒烟](../docs-site/tests/dev-server.test.mjs) | 临时服务检验初始搜索、正文 HMR 和访问边界 | HTTP / WebSocket | `test:smoke` |
 
 VitePress 1.6.4 的开发搜索索引需重启开发服务刷新；静态构建会重建索引。正文热更新与生产构建不由这项已知开发限制否定。
 
 ## 覆盖范围
 
-已覆盖第一方业务入口及维护支线的责任和关键修改点；没有逐段审计每个 UI 控件、用量 GraphQL 字段或所有供应商功能。`repo-docs/` 是本指南正文，根 README 是双语使用入口，贡献与安全文件各有独立维护职责。
+已覆盖第一方业务入口及维护支线的责任和关键修改点；没有逐段审计每个 UI 控件、用量 GraphQL 字段或所有供应商功能。`repo-docs/` 是源码级指南正文，根 README 是精简双语入口，`docs-site/` 面向使用与二次开发分层组织，贡献与安全文件各有独立维护职责。
 
-`assets/` 和 `img/` 仅作为展示素材概述；`node_modules`、`.vitepress/cache`、`.vitepress/dist`、`.wrangler` 和外部临时日志是依赖或生成物。文档主题目录保留的未启用装饰资源与第三方 vendor 不参与当前默认主题，也不作为业务源码覆盖。
+`assets/` 和 `img/` 仅作为展示素材概述；`node_modules`、`.vitepress/cache`、`.vitepress/dist`、`.wrangler` 和外部临时日志是依赖或生成物。`docs-site/.vitepress/theme/` 中的主题扩展与字体/动画资源仅服务文档站点，不参与业务请求。
 
 证据状态：除特别标注外，本页基于当前源码已确认。

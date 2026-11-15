@@ -1,4 +1,4 @@
-// VitePress 官方文档配置 (Coolify 架构风格 + 中英双语支持)
+// VitePress 官方文档配置（Tier B 三阶段渐进式导航 + 中英双语支持）
 import { defineConfig } from 'vitepress'
 import { guideLinks } from './guide-links.mts'
 
@@ -34,41 +34,46 @@ export default defineConfig({
     root: {
       label: '简体中文',
       lang: 'zh-CN',
-      title: "ModelBridge 官方文档",
-      description: "ModelBridge 是统一的大语言模型协议桥接与流式分发中间件。",
+      title: "模桥 ModelBridge 官方文档",
+      description: "基于 Cloudflare Workers 与自建 Node.js 24 SQLite 状态服务的多协议 LLM API 网关（OpenAI / Anthropic / Gemini）。",
       themeConfig: {
-        siteTitle: "ModelBridge 适配总线",
+        siteTitle: "模桥 ModelBridge",
         nav: [
-          { text: '官网首页', link: '/' },
-          { text: '快速入门', link: '/docs/' },
-          { text: '系统架构', link: '/docs/architecture' },
-          { text: '配置指南', link: '/docs/configuration' },
-          { text: '常见问题', link: '/docs/faq' },
+          { text: '首页', link: '/' },
+          { text: '1. 起步与部署', link: '/docs/' },
+          { text: '2. 契约与扩展', link: '/docs/contracts' },
+          { text: '3. 原理与源码', link: '/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
-            text: '快速入门',
+            text: '1. 起步与配置部署',
             items: [
-              { text: '项目概览与上手', link: '/docs/' },
+              { text: '项目全貌与多平台部署', link: '/docs/' },
+              { text: '部署运维与排错 FAQ', link: '/docs/deployment-faq' },
             ]
           },
           {
-            text: '系统架构',
+            text: '2. 接口与扩展契约',
             items: [
-              { text: '架构设计与全景图', link: '/docs/architecture' },
+              { text: '接口、安全与路由契约', link: '/docs/contracts' },
+              { text: '上游容错与扩展指南', link: '/docs/adapters' },
             ]
           },
           {
-            text: '配置与实践',
+            text: '3. 原理与源码导览',
             items: [
-              { text: '配置与使用指南', link: '/docs/configuration' },
-            ]
-          },
-          {
-            text: '运维与支持',
-            items: [
-              { text: '常见问题与排错', link: '/docs/faq' },
+              { text: '架构全景与模块交互', link: '/docs/architecture' },
+              { text: '关键架构决策与迁移', link: '/docs/migrations' },
+              { text: '源码走读：一次完整请求', link: '/walkthroughs/one-real-run' },
+              { text: '代码地图（Code Map）', link: '/code-map' },
+              { text: '模块：访问与配置存储', link: '/modules/access-and-config' },
+              { text: '模块：路由与协议转换', link: '/modules/routing-and-protocols' },
+              { text: '模块：上游、OAuth 与配额', link: '/modules/upstream-and-quota' },
+              { text: '模块：边缘平台与自建状态', link: '/modules/platform-adapters' },
+              { text: '核心术语表与证据索引', link: '/glossary' },
+              { text: '源码证据与质量审查', link: '/references/source-evidence' },
+              { text: '文档校准与验证记录', link: '/change-log' },
             ]
           }
         ],
@@ -81,40 +86,38 @@ export default defineConfig({
       lang: 'en-US',
       link: '/en/',
       title: "ModelBridge Documentation",
-      description: "ModelBridge is a unified Large Language Model protocol bridge and streaming distribution middleware.",
+      description: "Multi-protocol LLM API proxy across OpenAI, Anthropic, and Gemini on Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and Node.js 24 + SQLite.",
       themeConfig: {
-        siteTitle: "ModelBridge Bus",
+        siteTitle: "ModelBridge",
         nav: [
           { text: 'Home', link: '/en/' },
-          { text: 'Quick Start', link: '/en/docs/' },
-          { text: 'Architecture', link: '/en/docs/architecture' },
-          { text: 'Configuration', link: '/en/docs/configuration' },
-          { text: 'FAQ', link: '/en/docs/faq' },
+          { text: '1. Deployment', link: '/en/docs/' },
+          { text: '2. Contracts', link: '/en/docs/contracts' },
+          { text: '3. Architecture', link: '/en/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
-            text: 'Quick Start',
+            text: '1. Getting Started & Deployment',
             items: [
-              { text: 'Overview & Getting Started', link: '/en/docs/' },
+              { text: 'Overview & Multi-Platform Matrix', link: '/en/docs/' },
+              { text: 'Deployment & Operations FAQ', link: '/en/docs/deployment-faq' },
             ]
           },
           {
-            text: 'Architecture',
+            text: '2. Contracts & Extension',
             items: [
-              { text: 'Architecture Design', link: '/en/docs/architecture' },
+              { text: 'API, Security & Routing Contracts', link: '/en/docs/contracts' },
+              { text: 'Failover, Adapters & Extensions', link: '/en/docs/adapters' },
             ]
           },
           {
-            text: 'Configuration & Practice',
+            text: '3. Architecture & Code Tour',
             items: [
-              { text: 'Configuration Guide', link: '/en/docs/configuration' },
-            ]
-          },
-          {
-            text: 'Operations & Support',
-            items: [
-              { text: 'FAQ & Diagnostics', link: '/en/docs/faq' },
+              { text: 'Architecture & Module Overview', link: '/en/docs/architecture' },
+              { text: 'Architecture Decisions & Migrations', link: '/en/docs/migrations' },
+              { text: 'Source Guide Index (repo-docs)', link: '/en/walkthroughs/one-real-run' },
+              { text: 'Code Map & Module Reference', link: '/en/code-map' },
             ]
           }
         ],

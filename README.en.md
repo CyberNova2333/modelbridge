@@ -4,272 +4,77 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0--only-2563eb?style=flat-square" alt="License: AGPL-3.0-only"></a>
-  <a href="#quick-deployment"><img src="https://img.shields.io/badge/Cloudflare-Workers-0c5cab?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="Runtime: Cloudflare Workers"></a>
-  <a href="_worker.js"><img src="https://img.shields.io/badge/JavaScript-ES_Modules-3178c6?style=flat-square&amp;logo=javascript&amp;logoColor=white" alt="JavaScript ES Modules"></a>
-  <a href="repo-docs/modules/routing-and-protocols.md"><img src="https://img.shields.io/badge/API-OpenAI%20%7C%20Anthropic%20%7C%20Gemini-1d4ed8?style=flat-square" alt="Client APIs: OpenAI, Anthropic, Gemini"></a>
+  <a href="docs-site/en/docs/index.md"><img src="https://img.shields.io/badge/Cloudflare-Workers-0c5cab?style=flat-square&amp;logo=cloudflare&amp;logoColor=white" alt="Runtime: Cloudflare Workers"></a>
+  <a href="src/self-hosted/server.mjs"><img src="https://img.shields.io/badge/State-Node.js_24_%2B_SQLite-3178c6?style=flat-square" alt="State Backend: Node.js 24 + SQLite"></a>
+  <a href="docs-site/en/docs/contracts.md"><img src="https://img.shields.io/badge/API-OpenAI%20%7C%20Anthropic%20%7C%20Gemini-1d4ed8?style=flat-square" alt="APIs: OpenAI, Anthropic, Gemini"></a>
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <strong>English</strong>
+  <a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://cybernova2333.github.io/modelbridge/en/">Docs Site</a>
 </p>
 
 <p align="center">
-  <a href="#quick-deployment">Quick deployment</a> · <a href="repo-docs/README.md">Project guide</a> · <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="#quick-start">Quick Start</a> · <a href="docs-site/en/docs/index.md">Deployment</a> · <a href="repo-docs/README.md">Source Guide (ZH)</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-ModelBridge is a multi-model, multi-protocol API gateway with a native Cloudflare Workers entry and platform adapters for EdgeOne Makers and Alibaba Cloud ESA. Configure upstream accounts and model aliases, then use OpenAI, Anthropic or Gemini client interfaces to call supported models. Its blue management interface handles accounts, gateway keys and Cloudflare usage.
+**ModelBridge** is a multi-protocol LLM API proxy and router derived from [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API). One shared core exposes **OpenAI, Anthropic, and Gemini** client endpoints across Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and a self-hosted Node.js 24 + SQLite state service. It does not implement `/v1/responses`, full image/audio media-generation APIs, or exact cross-provider token counting (`:countTokens` returns `501`).
 
-The recommended deployment uses a self-hosted Node.js 24 + SQLite state service. Cloudflare Workers, Makers and ESA connect over HTTPS without requiring Cloudflare DO or KV. Native DO deployments retain a compatibility and migration path. Platform capacities differ, and real cloud acceptance is pending. See the [platform guide](repo-docs/modules/platform-adapters.md) (Chinese).
+## Capabilities & Architecture Flow
 
-Based on [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API), it supports Cloudflare Workers AI, OpenAI-compatible services, Anthropic, Gemini and an experimental Antigravity (Google Cloud Code) integration. The native Pages setup described below requires a Durable Object hosted by a Worker.
+- **Cross-Protocol Translation with Semantic Checks**: Serves `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/messages`, and `/v1beta/models/*`, preserving tool calls, `strict`, and signed thinking replay metadata while rejecting unrepresentable constraints pre-flight.
+- **Single State Authority & 4-Credential Isolation**: Separates `ADMIN_PASSWORD` (24h sessions), client `apiKeys`, upstream credentials, and `MODELBRIDGE_STATE_TOKEN` across self-hosted SQLite transactions or compatibility `AppConfigStore` DO.
+- **Deterministic Routing & Bounded Failover**: Resolves `@cf/`, provider prefixes, `upstream:<accountId>:<model>`, and the 65-entry `cloudflare-model-map.json`; fails over across at most 3 candidate accounts only on explicit `401/403/404/429` rejections.
+- **Edge Runtime Adapters & Admin Console**: Ships a Primer-styled portal `/` and admin UI `/admin` with per-platform budgets (Cloudflare `16 MiB`, Makers `1 MiB`, ESA `4` subrequests / `9s` first byte / `115s` total).
 
-Brand assets: [horizontal logo](assets/modelbridge-logo.svg) · [square icon](assets/modelbridge-icon.svg). The website name is set by `PROJECT_DISPLAY_NAME`, independently of the Wrangler Worker service name.
+```mermaid
+flowchart LR
+    C["Clients (OpenAI / Anthropic / Gemini)"] -->|"Bearer / x-api-key / x-goog-api-key"| G["Edge Entry (CF / Makers / ESA)"]
+    G -->|"Per-request budget & auth"| R["Shared Core (_worker.js)"]
+    R <-->|"HTTPS RPC or DO store"| S["State Authority (Node 24 SQLite / DO)"]
+    R -->|"Bounded fetch & conversion"| U["Upstreams (CF / OpenAI / Anthropic / Gemini / AG)"]
+    U -->|"Sanitized JSON / SSE"| C
+```
 
-### Interface preview
+## Quick Start
 
-These screenshots use local demonstration data.
-
-![Public homepage](img/1.png)
-
-![Management interface](img/2.png)
-
-## Reading paths
-
-| Goal | Start here | What you will learn |
-| --- | --- | --- |
-| Deploy and make a request | [Quick deployment](#quick-deployment) → [First use](#first-use) | Bindings, accounts and request examples |
-| Understand a request | [Project guide](repo-docs/README.md) → [Main walkthrough](repo-docs/walkthroughs/one-real-run.md) | Authentication, routing and response handling |
-| Check compatibility and operating limits | [Routing and protocols](repo-docs/modules/routing-and-protocols.md), [Upstreams and quota](repo-docs/modules/upstream-and-quota.md) | Supported conversions, explicit rejections and retry boundaries |
-| Change code or contribute | [Code map](repo-docs/code-map.md), [Contributing](CONTRIBUTING.md) | Change locations, verification and commit conventions |
-| Audit the explanations | [Source evidence](repo-docs/references/source-evidence.md) | Confirmed claims, verification boundaries and exclusions |
-
-The detailed living guide is maintained in Chinese; this README provides the corresponding English setup and usage instructions.
-
-## Capabilities and boundaries
-
-- OpenAI Chat Completions, legacy Completions, Embeddings, Anthropic Messages, and Gemini generation, embedding and model-catalog endpoints.
-- Multiple accounts, model aliases, per-account model declarations and bounded failover across at most three candidate accounts.
-- Supported JSON and streaming conversions preserve tool calls, refusals, truncation and signed thinking. Constraints that cannot be represented produce explicit errors.
-- Separate administrator authentication, client gateway keys and upstream credentials. Model access stays closed until a gateway key exists and closes after the last key is deleted.
-- A self-hosted SQLite transaction store or native Durable Object preserves concurrent configuration updates and key revocation; Cloudflare usage is displayed from a cache.
-
-The model catalog includes several task types. A listed model is not necessarily callable through chat. Full image, audio and other media-generation APIs, and exact cross-provider token counting, are not implemented. Real model access depends on upstream permissions; mocked tests do not establish production acceptance.
-
-## Quick deployment
-
-Clone the public repository:
+Run the mocked regression suite and generate all six deployment projects under `dist/` (requires Node.js 24+; no root `pnpm install` needed):
 
 ```sh
 git clone https://github.com/CyberNova2333/modelbridge.git
 cd modelbridge
-```
-
-For new deployments, use the [self-hosted state service and platform entries](repo-docs/modules/platform-adapters.md). The following native Cloudflare DO setup remains available for existing deployments.
-
-### Workers (native DO compatibility)
-
-Install Node.js 24+, sign in to your own Cloudflare account with Wrangler, and create a KV namespace:
-
-```sh
-pnpm dlx wrangler login
-pnpm dlx wrangler kv namespace create KV
-```
-
-The checked-in `wrangler.toml` retains the maintainer's deployment settings. Change the following for a new instance; preserve the existing storage bindings when upgrading:
-
-| Setting | Action |
-| --- | --- |
-| `name` | Choose your Worker name; this does not rename the website brand |
-| `account_id` | Use your Cloudflare Account ID |
-| `routes` | Use your custom domain, or remove the route to use the Workers domain |
-| `kv_namespaces` → `id` | Use the ID returned above; retain the original KV for upgrades |
-| `CONFIG_STORE` / `AppConfigStore` | Keep the Durable Object binding and `new_sqlite_classes` migration |
-
-KV binding:
-
-```toml
-[[kv_namespaces]]
-binding = "KV"
-id = "YOUR_KV_NAMESPACE_ID"
-```
-
-Retain the `global_fetch_strictly_public` and `enable_request_signal` compatibility flags, and `observability.redact_query_string = true`. The [compatibility flags](https://developers.cloudflare.com/workers/configuration/compatibility-flags/) route global fetch through the public Internet path instead of a shortcut to the Worker's own zone origin, and enable incoming request cancellation signals. The [logging setting](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/script_and_version_settings/) removes query strings from request URLs in logs and traces. Public routing is not a complete private-network firewall.
-
-```sh
-pnpm dlx wrangler deploy
-pnpm dlx wrangler secret put ADMIN_PASSWORD
-```
-
-The `ADMIN_PASSWORD` administrator Secret is required: access is blocked without it. Existing deployments do not need to set it again during upgrades. Never put passwords or upstream credentials in `wrangler.toml`.
-
-Wrangler applies the SQLite Durable Object migration on deployment. On first configuration access, `AppConfigStore` imports the original KV `config` once. Accounts, gateway keys and mappings then use the Durable Object as their authority; sessions and usage caches also live there. The old KV snapshot is not kept in sync. A rollback must preserve the current Durable Object; a version that reads only the old KV can restore stale state. See [Access and configuration](repo-docs/modules/access-and-config.md).
-
-### Pages
-
-Under the [Pages binding requirements](https://developers.cloudflare.com/pages/functions/bindings/), Pages cannot host a Durable Object independently; uploading `_worker.js` alone is insufficient:
-
-1. Follow the Workers instructions to deploy a Worker exporting `AppConfigStore`, bound to the original `KV`.
-2. Upload `_worker.js` to Pages, bind the same `KV`, and set `ADMIN_PASSWORD`.
-3. Add a `CONFIG_STORE` Durable Object binding to that Worker's `AppConfigStore`. A Pages Wrangler configuration needs `script_name`:
-
-```toml
-[[durable_objects.bindings]]
-name = "CONFIG_STORE"
-class_name = "AppConfigStore"
-script_name = "YOUR_CONFIG_WORKER_NAME"
-```
-
-4. Enable `global_fetch_strictly_public` and `enable_request_signal` for Pages. Prefer client keys in request headers, separately check whether Pages logs retain query parameters, and redeploy.
-
-Keep Pages and its hosting Worker on the same code version. Upgrade the Worker first; it owns the migration. They share configuration, but each entry point authenticates against its own administrator Secret, with sessions isolated by origin.
-
-### Self-hosted state + Cloudflare / EdgeOne Makers / Alibaba Cloud ESA
-
-Generate deployment projects with Node.js 24+, without installing root pnpm dependencies:
-
-```sh
+node --test tests/*.test.mjs
 node tools/build-platforms.mjs
 ```
 
-For a new deployment, use `dist/self-hosted-state/` with `dist/cloudflare-remote/`, `dist/edgeone/` or `dist/esa/` gateway entries. `dist/cloudflare/` and `dist/state-service/` remain available for native DO hosting and migration. Each project includes templates and a README. Building does not read real Secrets, change the existing Wrangler configuration or publish services.
+| Deployment / Mode | Output & Scope | Documentation Entry |
+| :--- | :--- | :--- |
+| **Self-Hosted State + Remote Gateways (Recommended)** | `dist/self-hosted-state/` shared by `cloudflare-remote`, `edgeone`, `esa` | [Getting Started & Deployment](docs-site/en/docs/index.md) · [Template](deploy/self-hosted-state/README.md) |
+| **Cloudflare Workers (Remote State)** | `dist/cloudflare-remote/` without KV or Durable Object bindings | [Multi-Platform Matrix](docs-site/en/docs/index.md#multi-platform-deployment-matrix) · [Template](deploy/cloudflare-remote/README.md) |
+| **Cloudflare Workers / Pages (Native DO)** | `_worker.js` + `wrangler.toml` with `AppConfigStore` compatibility | [Native DO & Pages](docs-site/en/docs/index.md#native-cloudflare-do--pages-compatibility) · [Template](deploy/cloudflare/README.md) |
+| **EdgeOne Makers / Alibaba Cloud ESA** | `dist/edgeone/` (`1 MiB` limit) and `dist/esa/` (`4`-fetch cap) | [Platform Budgets](docs-site/en/docs/index.md#multi-platform-deployment-matrix) · [Deployment FAQ](docs-site/en/docs/deployment-faq.md) |
+| **Offline Migration, Backup & Docs Site** | `tools/state-admin.mjs` and `pnpm --dir docs-site run docs:build` | [Decisions & Migrations](docs-site/en/docs/migrations.md) · [Walkthrough (ZH)](repo-docs/walkthroughs/one-real-run.md) |
 
-Follow the [self-hosted service setup](deploy/self-hosted-state/README.md) to prepare persistent local storage and an HTTPS reverse proxy. Configure `DB_PATH`, `MODELBRIDGE_STATE_PUBLIC_ORIGIN`, an independent `MODELBRIDGE_STATE_TOKEN` (or token file), and exact allowed gateway origins in `MODELBRIDGE_STATE_ORIGINS`. Each gateway needs `ADMIN_PASSWORD`, the shared service token and the full `MODELBRIDGE_STATE_URL`, such as `https://state.example/_modelbridge/state`. The service token grants access to upstream credentials and state mutations: keep it exclusively in server-side Secrets. SQLite hosting targets one machine with a local disk; shared network filesystems and independent multi-host writers are unsupported.
+## Pre-Adoption FAQ
 
-Build Makers as a project with only `public/` as static output; deploy ESA as a pure function. The Makers application budget is 1 MiB, subject to any smaller platform ceiling. ESA adapters enforce four outbound requests, a nine-second first-data deadline and a 115-second total deadline. Missing native cancellation APIs fail closed. Deployment, shared login-rate-limit buckets and acceptance boundaries are explained in the [platform guide](repo-docs/modules/platform-adapters.md).
+- **Q: Does ModelBridge support self-hosted Ollama, vLLM, or custom OpenAI-compatible endpoints?**
+  Yes. Create an `openai` upstream account in the admin UI with a custom `baseUrl` (public HTTPS, or HTTP loopback for local development) and declare its model IDs; there is no separate Ollama provider type.
+- **Q: Should I choose `Node.js 24 + SQLite` or native Cloudflare `DO / KV`?**
+  New deployments should use `self-hosted-state` (single-host SQLite + WAL transactions) so Cloudflare, Makers, and ESA share one authority; native DO remains for existing Cloudflare setups, and KV is only migrated once on DO initialization.
+- **Q: Do `cloudflare-model-map.json` or the 10,000 Neurons counter enforce hard spending caps?**
+  No. The 65 preset aliases and cached 5-minute dashboard counter are discovery and display helpers only, not server-side spending limiters.
+- **Q: Will ModelBridge retry another account on timeouts or `5xx` errors?**
+  No. To prevent duplicate billing after an upstream may have started generation, failover occurs only on explicit `401`, `403`, `404`, or `429` responses (up to 3 candidates).
 
-## First use
+## Reading Paths
 
-1. Open your deployment and sign in with `ADMIN_PASSWORD`.
-2. Add an upstream account and its supported model IDs in account management. Cloudflare accounts need an Account ID and API Token.
-3. Generate a client gateway key in API key management.
-4. Choose a configured model that the upstream account may invoke. For OpenAI clients, use `https://YOUR_GATEWAY_DOMAIN/v1` as the Base URL and supply the gateway key.
+| Goal | Docs Site (`docs-site/`) | Source Guide (`repo-docs/`, Chinese) |
+| :--- | :--- | :--- |
+| Deployments, Secrets & Env Matrix | [1. Getting Started & Deployment](docs-site/en/docs/index.md) · [Deployment FAQ](docs-site/en/docs/deployment-faq.md) | [Platform Adapters & State](repo-docs/modules/platform-adapters.md) |
+| Client APIs, Routing & Custom Providers | [2. API & Routing Contracts](docs-site/en/docs/contracts.md) · [Adapters & Extensions](docs-site/en/docs/adapters.md) | [Routing & Protocols](repo-docs/modules/routing-and-protocols.md) · [Upstreams & Quota](repo-docs/modules/upstream-and-quota.md) |
+| Request Lifecycle & Code Navigation | [3. Architecture & Code Tour](docs-site/en/docs/architecture.md) | [One Real Run](repo-docs/walkthroughs/one-real-run.md) · [Code Map](repo-docs/code-map.md) · [Access & Config](repo-docs/modules/access-and-config.md) |
+| DO Migration, Backups & ADRs | [Decisions & Migrations (ADR)](docs-site/en/docs/migrations.md) | [Glossary](repo-docs/glossary.md) · [Source Evidence](repo-docs/references/source-evidence.md) · [Change Log](repo-docs/change-log.md) |
+| Contributing, Hooks & Security Policy | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [AGENTS.md](AGENTS.md) |
 
-The following examples use Bash/curl. Replace the domain, key and model alias:
+## Acknowledgments & License
 
-```sh
-curl 'https://YOUR_GATEWAY_DOMAIN/v1/chat/completions' \
-  -H 'Authorization: Bearer YOUR_GATEWAY_API_KEY' \
-  -H 'Content-Type: application/json' \
-  -d '{"model":"gpt-oss-20b","messages":[{"role":"user","content":"Hello"}]}'
-```
-
-Administrator sessions use random tokens and expire after 24 hours. Logout or password rotation invalidates the corresponding sessions. Each source IP is limited to 10 failed logins per 15-minute window. Revoked gateway keys stop working on the next request; configuration snapshots are reused only within one request. See [Access and configuration](repo-docs/modules/access-and-config.md) for trust boundaries and [Security](SECURITY.md) for reporting issues.
-
-## Upstreams and model mappings
-
-| Provider | Default Base URL | Credentials |
-| --- | --- | --- |
-| Cloudflare | Fixed Workers AI address | Account ID and API Token |
-| OpenAI | `https://api.openai.com/v1` | API Key |
-| Anthropic | `https://api.anthropic.com/v1` | API Key |
-| Gemini | `https://generativelanguage.googleapis.com/v1beta` | API Key |
-| Antigravity | Built-in Cloud Code address | Email and Refresh Token; Access Token also supported |
-
-Generic upstreams accept a custom compatible Base URL. It must be public HTTPS without a username, password, query or fragment; HTTP loopback addresses are allowed for local development. Blank credentials retain the stored value only when editing the same provider. Changing providers requires a fresh credential and does not inherit the previous destination, identity or OAuth project. Account listings do not return real upstream keys.
-
-Enter upstream model IDs on separate lines or separated by commas. A nonempty list restricts that account to those models; an empty list applies no model restriction. Declared generic upstream models can be used directly. Use explicit mappings to avoid ambiguous names:
-
-```json
-{
-  "my-chat": "openai:YOUR_MODEL_ID",
-  "my-claude": "anthropic:YOUR_MODEL_ID",
-  "my-gemini": "gemini:YOUR_MODEL_ID",
-  "my-oauth": "antigravity:YOUR_MODEL_ID",
-  "my-vector": "@cf/baai/bge-m3"
-}
-```
-
-For Cloudflare or generic upstreams, use `upstream:ACCOUNT_ID:MODEL_ID` to select a particular stored account; Antigravity uses its own routing prefixes. Only active accounts of the matching provider and model declaration participate. Direct `@cf/...` names and explicit provider prefixes bypass alias lookup, so the mapping table is not a complete access or spending allowlist. Cloudflare model paths containing traversal, queries or fragments are rejected. See [Routing and protocols](repo-docs/modules/routing-and-protocols.md).
-
-The checked-in [Cloudflare mapping](cloudflare-model-map.json) has 65 entries, maintained as models eligible for daily free quota. Restoring defaults reinstates that list. Entries include chat, embeddings and other tasks; choose an endpoint the model supports. The dashboard estimates free quota at 10,000 Neurons per Cloudflare Account ID per day; extra tokens for one account do not increase it. Actual pricing, available models and overage charges follow [Cloudflare pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/). Neither the mapping nor the cached statistics enforce a spending cap.
-
-## Experimental Antigravity integration
-
-Select Antigravity in account management and paste the email and `refresh_token`; no JSON import is needed. Saving an active account validates sign-in and discovers its project before persisting it. Advanced settings can specify an authorized project and the OAuth client that issued the token; normally leave the client settings empty to use the built-in client. Changes to the email, token or OAuth identity trigger rediscovery for automatically discovered projects; manually specified projects are retained.
-
-Environment Secrets are also supported:
-
-```sh
-pnpm dlx wrangler secret put ANTIGRAVITY_REFRESH_TOKEN
-```
-
-Optional settings include `ANTIGRAVITY_PROJECT_ID` and `ANTIGRAVITY_EMAIL`. Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` together; account-level settings take precedence. For multiple environment accounts, use the `ANTIGRAVITY_ACCOUNTS` JSON array described in [Upstreams and quota](repo-docs/modules/upstream-and-quota.md). Legacy `ya29.` Access Tokens work but cannot renew themselves.
-
-Built-in aliases include `claude-sonnet-4-5-thinking`, `claude-opus-4-5-thinking`, `claude-sonnet-4-5`, `gemini-3-flash`, `gemini-3-pro-high` and `gemini-3-pro-low`. An alias does not grant model access. Both `antigravity:` and `@antigravity/` prefixes work. Claude Code can use the gateway root as `ANTHROPIC_BASE_URL` with a gateway key; other clients use their respective protocol endpoints.
-
-This experimental adapter targets an internal Google Cloud Code interface, which may change. A refreshed token permits one 401 retry; concurrent refreshes are coalesced only within the same Worker isolate. Multi-turn tool use must retain returned thinking signatures. Images require inline base64; remote image URLs, documents and non-text tool-result media are unsupported. Structured JSON output constraints and unrepresentable thinking settings are rejected before generation. The gateway does not inject extra system prompts or fabricate user messages.
-
-## Client protocols
-
-| Interface | Method and path | Gateway authentication |
-| --- | --- | --- |
-| OpenAI model catalog | `GET /v1/models` | `Authorization: Bearer YOUR_GATEWAY_API_KEY` |
-| OpenAI chat / legacy completion | `POST /v1/chat/completions`, `/v1/completions` | Same as above |
-| OpenAI embeddings | `POST /v1/embeddings` | Same as above |
-| Anthropic messages | `POST /v1/messages` | `x-api-key: YOUR_GATEWAY_API_KEY` |
-| Gemini catalog / single model | `GET /v1beta/models`, `/v1beta/models/{model}` | `x-goog-api-key: YOUR_GATEWAY_API_KEY` |
-| Gemini generation / streaming | `POST /v1beta/models/{model}:generateContent`, `:streamGenerateContent?alt=sse` | Same as above |
-| Gemini embeddings / batch | `POST /v1beta/models/{model}:embedContent`, `:batchEmbedContents` | Same as above |
-
-Gemini also accepts `/v1/models/{model}:action`, but `GET /v1/models` always uses the OpenAI list format. Gemini streaming without `alt=sse` returns a JSON array stream; `:countTokens` returns 501. Gemini accepts `?key=`, but headers are recommended and query-string log redaction must be retained. These are gateway keys; configure upstream credentials only in account management or environment Secrets.
-
-```sh
-curl 'https://YOUR_GATEWAY_DOMAIN/v1beta/models/gpt-oss-20b:generateContent' \
-  -H 'x-goog-api-key: YOUR_GATEWAY_API_KEY' \
-  -H 'Content-Type: application/json' \
-  -d '{"contents":[{"role":"user","parts":[{"text":"Hello"}]}]}'
-```
-
-Support for text, supported image inputs, function tools, structured output and signed replay depends on the destination. Native constraints such as Anthropic built-in search tools or Gemini safety settings and cached context cannot silently degrade across providers. Tool `strict` is retained between OpenAI and Anthropic; routes unable to guarantee strict tools reject them. Conflicting Gemini field aliases and unrepresentable sampling or output constraints return 400. Abnormal terminal states, invalid tool arguments and incomplete streams produce errors. See [Routing and protocols](repo-docs/modules/routing-and-protocols.md) for the full boundaries.
-
-## Usage and resource limits
-
-The public homepage reads cached summaries. Administrator refreshes query Cloudflare usage. The five-minute cache coalesces concurrent refreshes and groups credentials by Account ID, with at most 20 accounts per batch and four concurrent queries. Check other providers' usage in their own consoles.
-
-| Operation | Limits and effects |
-| --- | --- |
-| Login / management / model JSON input | Actual-byte limits of 16 KiB / 1 MiB / 16 MiB, including inline base64; oversized bodies return 413, malformed JSON returns 400 |
-| Model response | Abort after 120 seconds waiting for headers or an idle body; maximum 32 MiB |
-| Account failover | At most three matching accounts for explicit 401, 403, 404 or 429 rejection; uncertain network outcomes, invalid success responses and server errors do not regenerate |
-| Generic connection test | Reads the model catalog; does not prove invocation permissions for all models |
-| Antigravity connection test | Checks sign-in and project, without generating an answer |
-| Cloudflare connection test | Includes one small embedding inference and consumes quota; 15-second header/idle timeout and 1 MiB response limit |
-
-These are shared-core limits. Makers also enforces a 1 MiB application input budget and its platform limit; ESA adds a 9-second first-data deadline, a 115-second total deadline and four outbound fetches per request, including state queries. See [platform budgets](repo-docs/modules/platform-adapters.md#平台预算怎样影响请求).
-
-Upstream errors and SSE metadata are sanitized; ordinary model text and signatures retain their values. Client cancellation propagates to the upstream connection, but does not prove that computation or billing stopped. Embedding outputs are checked for count, indices, dimensions and encoding; invalid output returns 502 without repeating generation on another account. See [Upstreams and quota](repo-docs/modules/upstream-and-quota.md).
-
-## Local verification and contribution
-
-Regression tests need Node.js 24+, Python 3.10+ and Git, with no root pnpm installation. Model upstreams and DO/KV are mocked; self-hosted state also uses real temporary SQLite databases, independent processes and loopback HTTP. Python and Git exercise the maintenance guard in temporary repositories.
-
-```sh
-node --test tests/*.test.mjs
-```
-
-Tests cover authentication and concurrent configuration, credential isolation, account routing, JSON/SSE conversions, tools and signed replay, cancellation and response boundaries, embeddings and OAuth refresh. Actual runs are recorded in the [guide change log](repo-docs/change-log.md). Mock results do not establish real account permissions, production persistence or a successful deployment.
-
-See [Contributing](CONTRIBUTING.md) for fresh-clone guard installation, the Commit Message template, verification requirements and history maintenance. Read the [agent rules](AGENTS.md) before changes and follow [Security](SECURITY.md) for sensitive reports.
-
-### Documentation site
-
-The Chinese guide lives in `repo-docs/` and is included by VitePress pages using the default theme. Install documentation dependencies separately:
-
-```sh
-pnpm --dir docs-site install --frozen-lockfile
-pnpm --dir docs-site run docs:build
-```
-
-Output defaults to `docs-site/.vitepress/dist/`. Append `-- --outDir <external-absolute-directory>` for an isolated build. Source links display precise repository paths; source files and local resources are not copied into the site.
-
-For local preview, use `pnpm --dir docs-site run docs:dev -- --host 127.0.0.1`. The `pnpm --dir docs-site run test:smoke` command starts a temporary local service to check initial search, Markdown HMR and file-access boundaries. VitePress 1.6.4 requires a development-server restart to refresh the search index; static builds regenerate it. Dependency versions and security patches are defined by the [documentation package](docs-site/package.json) and lockfile.
-
-## Upstream updates
-
-For GitHub forks, the sync workflow checks upstream daily. A read-only job merges candidate code and runs regression tests. A separate write-enabled job reconstructs the same tree, then creates a `codex/upstream-*` branch and draft PR for human review. It does not automatically merge or deploy, and the job holding a write token never executes candidate code. GitHub Actions must be allowed to create PRs. Conflicts and upstream workflow changes require manual handling. Actions are pinned to full commit SHAs.
-
-## Acknowledgments and license
-
-Thanks to the upstream [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) project and [Cloudflare](https://www.cloudflare.com/) for the platform and open-source ecosystem.
-
-This project is distributed under [GNU AGPLv3](LICENSE) (`AGPL-3.0-only`). The original WorkersAI2API MIT copyright and license text are preserved in the [upstream license](LICENSES/WorkersAI2API-MIT.txt). See [NOTICE](NOTICE) for provenance and distribution notices; third-party dependencies retain their respective licenses. Retain the applicable copyright and license notices when redistributing.
+Built on [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) and the [Cloudflare](https://www.cloudflare.com/) ecosystem. Licensed under [GNU AGPLv3](LICENSE) (`AGPL-3.0-only`); the original WorkersAI2API MIT copyright and license text are preserved verbatim in [`LICENSES/WorkersAI2API-MIT.txt`](LICENSES/WorkersAI2API-MIT.txt), with provenance notices in [`NOTICE`](NOTICE).
