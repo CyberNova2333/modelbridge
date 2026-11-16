@@ -42,8 +42,11 @@ export default defineConfig({
           { text: '首页', link: '/' },
           { text: '起步与部署', link: '/docs/' },
           { text: '契约与扩展', link: '/docs/contracts' },
+          { text: 'API 与组件', link: '/api-reference/' },
           { text: '原理与源码', link: '/docs/architecture' },
-          { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
+        ],
+        socialLinks: [
+          { icon: 'github', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
@@ -57,6 +60,7 @@ export default defineConfig({
             text: '接口与扩展契约',
             items: [
               { text: '接口、安全与路由契约', link: '/docs/contracts' },
+              { text: 'API 与组件参考', link: '/api-reference/' },
               { text: '上游容错与扩展指南', link: '/docs/adapters' },
             ]
           },
@@ -93,8 +97,11 @@ export default defineConfig({
           { text: 'Home', link: '/en/' },
           { text: 'Deployment', link: '/en/docs/' },
           { text: 'Contracts', link: '/en/docs/contracts' },
+          { text: 'API & Endpoints', link: '/en/api-reference/' },
           { text: 'Architecture', link: '/en/docs/architecture' },
-          { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
+        ],
+        socialLinks: [
+          { icon: 'github', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
@@ -108,6 +115,7 @@ export default defineConfig({
             text: 'Contracts & Extension',
             items: [
               { text: 'API, Security & Routing Contracts', link: '/en/docs/contracts' },
+              { text: 'API & Component Reference', link: '/en/api-reference/' },
               { text: 'Failover, Adapters & Extensions', link: '/en/docs/adapters' },
             ]
           },

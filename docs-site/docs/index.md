@@ -12,6 +12,8 @@
 | **配置与权威** | 自建 SQLite（WAL + `BEGIN IMMEDIATE`）或 Cloudflare `AppConfigStore` DO | 单一配置权威，不在 DO 与远程状态之间做双写或运行时静默降级 |
 | **免费模型预设与额度展示** | `cloudflare-model-map.json`（65 条 `@cf/...` 别名）与 5 分钟缓存参考计数器 | 别名表与控制台 10,000 Neurons 参考展示不做服务端强制消费拦截 |
 
+> 需交互式查阅 OpenAI / Anthropic / Gemini 全协议路由、`/api/*` 管理端点与 `/_modelbridge/state` RPC？可直接使用 [API 与组件参考](/api-reference/)。
+
 ## 本地构建与推荐起步流程
 
 仓库核心运行时和自建状态服务在 **Node.js 24+** 下直接执行，根目录无需安装第三方 npm 运行依赖：

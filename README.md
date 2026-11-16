@@ -26,6 +26,14 @@
 - **确定性路由与有界容错**：按 `@cf/`、供应商前缀、`upstream:<账号ID>:<模型>` 与 65 条预设映射解析目标；仅在明确的 `401/403/404/429` 拒绝时在最多 3 个匹配账号内切换，超时与 `5xx` 绝不重复生成。
 - **跨边缘部署与管理面板**：内置 Primer 风格公共门户 `/` 与控制台 `/admin`，按请求注入预算（Cloudflare `16 MiB`、Makers `1 MiB`、ESA `4` 次出站 fetch / `9s` 首包 / `115s` 总时长）。
 
+## 能做到什么程度与明确不能做什么
+
+| 维度 | 能做到什么程度（已实现能力） | 明确不能做什么（非目标与硬限制） |
+| --- | --- | --- |
+| 三协议接入与转换 | OpenAI（chat/completions/embeddings/models）、Anthropic `/v1/messages` 与 Gemini `/v1beta/models/*`，保留思考回放与 `strict` 检查 | **不支持** `/v1/responses`、图像/音频生成编辑，Gemini `:countTokens` 固定 `501`；不伪装兼容不支持字段 |
+| 状态与密钥隔离 | 四态密钥完全隔离；自建 SQLite（WAL）与 DO 单权威事务；`upstream:<id>:<model>` 精准路由 | **不做** SQLite 与 DO 双写或运行期静默切换；`modelMap` 不是访问控制白名单 |
+| 边缘预算与容错 | 生成 6 套平台产物（Makers 限 `1 MiB`、ESA 限 `4` fetch）；仅在 `401/403/404/429` 切换最多 3 账号 | **不因**超时或 `5xx` 自动重试（防重复计费）；10,000 Neurons 计数器非服务端消费拦截器 |
+
 ```mermaid
 flowchart LR
     C["客户端 (OpenAI / Anthropic / Gemini)"] -->|"Bearer / x-api-key / x-goog-api-key"| G["边缘入口 (CF / Makers / ESA)"]
@@ -70,7 +78,7 @@ node tools/build-platforms.mjs
 | 读者目标 | 文档站章节（`docs-site/`） | 源码指南（`repo-docs/`） |
 | :--- | :--- | :--- |
 | 部署、Secret 与环境变量配置 | [起步与配置部署](docs-site/docs/index.md) · [部署排错 FAQ](docs-site/docs/deployment-faq.md) | [多平台与自建状态](repo-docs/modules/platform-adapters.md) |
-| 客户端接入、模型映射与扩展开发 | [接口与路由契约](docs-site/docs/contracts.md) · [上游容错与扩展](docs-site/docs/adapters.md) | [模型路由与协议](repo-docs/modules/routing-and-protocols.md) · [上游与配额](repo-docs/modules/upstream-and-quota.md) |
+| 客户端接入、模型映射与扩展开发 | [接口与路由契约](docs-site/docs/contracts.md) · [API 与组件参考](docs-site/api-reference/index.md) · [上游容错与扩展](docs-site/docs/adapters.md) | [模型路由与协议](repo-docs/modules/routing-and-protocols.md) · [上游与配额](repo-docs/modules/upstream-and-quota.md) |
 | 一次请求链路、代码定位与安全边界 | [架构全景与源码导览](docs-site/docs/architecture.md) | [主流程走读](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) · [访问与配置](repo-docs/modules/access-and-config.md) |
 | DO 迁出、容灾备份与架构决策 | [关键架构决策与迁移](docs-site/docs/migrations.md) | [术语表](repo-docs/glossary.md) · [源码证据](repo-docs/references/source-evidence.md) · [变更记录](repo-docs/change-log.md) |
 | 贡献代码、提交护栏与安全报告 | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [AGENTS.md](AGENTS.md) |

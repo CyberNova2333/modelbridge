@@ -16,6 +16,8 @@ This page is an English translation of the [authoritative Chinese deployment doc
 | **State Authority** | Self-hosted SQLite (WAL + `BEGIN IMMEDIATE`) or Cloudflare `AppConfigStore` DO | Single authority per deployment; no dual-write or silent runtime fallback |
 | **Presets & Reference Usage** | `cloudflare-model-map.json` (65 `@cf/...` aliases) + 5-minute cached Neurons indicator | Discovery and display helpers only; not a hard server-side billing cap |
 
+> Want interactive schemas and runnable requests for OpenAI, Anthropic, Gemini, `/api/*`, and `/_modelbridge/state`? Jump to the [API & Component Reference](/en/api-reference/).
+
 ## Local Verification & Quick Build
 
 Requires **Node.js 24+** at the repository root (zero third-party runtime npm dependencies):

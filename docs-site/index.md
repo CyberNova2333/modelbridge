@@ -10,14 +10,14 @@ hero:
       text: 起步与部署
       link: /docs/
     - theme: alt
+      text: API 与组件参考
+      link: /api-reference/
+    - theme: alt
       text: 契约与扩展
       link: /docs/contracts
     - theme: alt
       text: 原理与源码
       link: /docs/architecture
-    - theme: alt
-      text: GitHub 仓库
-      link: https://github.com/CyberNova2333/modelbridge
 
 features:
   - title: 多协议互通与严格语义
@@ -27,6 +27,20 @@ features:
   - title: 边缘预算与有界容错
     details: 针对 Cloudflare（16 MiB）、EdgeOne Makers（1 MiB）与阿里云 ESA（4 次出站 fetch / 9s 首包 / 115s 总时长）注入运行约束；仅在 401/403/404/429 明确拒绝时最多尝试 3 个候选账号。
 ---
+
+## 能力定位与明确边界
+
+::: info 能做到什么程度（已实现能力）
+- **三协议互通与语义 pre-flight 守门**：同时暴露 OpenAI（`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/models`）、Anthropic `/v1/messages` 与 Gemini `/v1beta/models/*`，跨协议保留工具严格度与签名思考回放元数据。
+- **四态密钥隔离与单一状态权威**：`ADMIN_PASSWORD`、`apiKeys`、上游密钥与 `MODELBRIDGE_STATE_TOKEN` 严格隔离；Node 24 SQLite（WAL）状态服务与 Cloudflare `AppConfigStore` DO 各守单一权威，支持 `upstream:<id>:<model>` 精准路由。
+- **边缘平台预算注入与 SSRF 校验**：开箱生成 6 套平台产物（Cloudflare `16 MiB`、Makers `1 MiB`、ESA `4` 次 fetch）；`validateProviderBaseUrl` 强制公网 HTTPS 防私网探测。
+:::
+
+::: warning 明确不能做什么（非目标与硬限制）
+- **明确裁剪接口**：不提供 OpenAI `/v1/responses`、完整图像/音频生成编辑，Gemini `:countTokens` 固定返回 `501`；不做跨供应商精确 token 计量。
+- **不以别名表替白名单、超时不盲重试**：`cloudflare-model-map.json`（65 条）与控制台 Neurons 计数仅作展示与发现（非硬配额拦截）；超时及 `5xx` 绝不触发多账号重试防重复计费。
+- **无双写降级**：不在自建 SQLite 与原生 DO 之间双写或静默切换；`Makers` 请求体硬上限为 `1 MiB`。
+:::
 
 ## 架构全景
 

@@ -26,6 +26,14 @@
 - **Deterministic Routing & Bounded Failover**: Resolves `@cf/`, provider prefixes, `upstream:<accountId>:<model>`, and the 65-entry `cloudflare-model-map.json`; fails over across at most 3 candidate accounts only on explicit `401/403/404/429` rejections.
 - **Edge Runtime Adapters & Admin Console**: Ships a Primer-styled portal `/` and admin UI `/admin` with per-platform budgets (Cloudflare `16 MiB`, Makers `1 MiB`, ESA `4` subrequests / `9s` first byte / `115s` total).
 
+## Capabilities & Explicit Non-Goals
+
+| Area | What ModelBridge Delivers | Explicit Non-Goals & Hard Bounds |
+| --- | --- | --- |
+| Multi-Protocol Core | OpenAI (chat/completions/embeddings/models), Anthropic `/v1/messages`, Gemini `/v1beta/models/*` with replay & `strict` checks | **Omits** `/v1/responses`, image/audio media gen, and cross-provider token counting (`:countTokens` returns `501`) |
+| State & Credentials | 4-domain secret isolation; transactional Node 24 WAL SQLite or `AppConfigStore` DO; `upstream:<id>:<model>` routing | **No** SQLite/DO dual-write or silent fallback; `modelMap` is not an access-control allowlist |
+| Budgets & Failover | Emits 6 bundles (`1 MiB` Makers, `4`-fetch ESA); bounded 3-account failover strictly on `401/403/404/429` | **Never** retries timeouts or `5xx` errors (prevents double billing); 10k Neurons counter is advisory only |
+
 ```mermaid
 flowchart LR
     C["Clients (OpenAI / Anthropic / Gemini)"] -->|"Bearer / x-api-key / x-goog-api-key"| G["Edge Entry (CF / Makers / ESA)"]
@@ -70,7 +78,7 @@ node tools/build-platforms.mjs
 | Goal | Docs Site (`docs-site/`) | Source Guide (`repo-docs/`, Chinese) |
 | :--- | :--- | :--- |
 | Deployments, Secrets & Env Matrix | [Getting Started & Deployment](docs-site/en/docs/index.md) · [Deployment FAQ](docs-site/en/docs/deployment-faq.md) | [Platform Adapters & State](repo-docs/modules/platform-adapters.md) |
-| Client APIs, Routing & Custom Providers | [API & Routing Contracts](docs-site/en/docs/contracts.md) · [Adapters & Extensions](docs-site/en/docs/adapters.md) | [Routing & Protocols](repo-docs/modules/routing-and-protocols.md) · [Upstreams & Quota](repo-docs/modules/upstream-and-quota.md) |
+| Client APIs, Routing & Custom Providers | [API & Routing Contracts](docs-site/en/docs/contracts.md) · [API & Component Reference](docs-site/en/api-reference/index.md) · [Adapters & Extensions](docs-site/en/docs/adapters.md) | [Routing & Protocols](repo-docs/modules/routing-and-protocols.md) · [Upstreams & Quota](repo-docs/modules/upstream-and-quota.md) |
 | Request Lifecycle & Code Navigation | [Architecture & Code Tour](docs-site/en/docs/architecture.md) | [One Real Run](repo-docs/walkthroughs/one-real-run.md) · [Code Map](repo-docs/code-map.md) · [Access & Config](repo-docs/modules/access-and-config.md) |
 | DO Migration, Backups & ADRs | [Decisions & Migrations (ADR)](docs-site/en/docs/migrations.md) | [Glossary](repo-docs/glossary.md) · [Source Evidence](repo-docs/references/source-evidence.md) · [Change Log](repo-docs/change-log.md) |
 | Contributing, Hooks & Security Policy | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [AGENTS.md](AGENTS.md) |

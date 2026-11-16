@@ -10,14 +10,14 @@ hero:
       text: Deployment
       link: /en/docs/
     - theme: alt
+      text: API & Endpoints
+      link: /en/api-reference/
+    - theme: alt
       text: Contracts
       link: /en/docs/contracts
     - theme: alt
       text: Architecture
       link: /en/docs/architecture
-    - theme: alt
-      text: GitHub Repo
-      link: https://github.com/CyberNova2333/modelbridge
 
 features:
   - title: Cross-Protocol Translation
@@ -30,6 +30,20 @@ features:
 
 ::: warning AI Translation Notice
 This site and documentation have been translated by an AI language model. In case of any discrepancies or ambiguities, please refer to the [Chinese documentation](/docs/) as the authoritative source.
+:::
+
+## Capabilities & Explicit Limits
+
+::: info What ModelBridge Delivers
+- **Three-Protocol Ingress & Pre-Flight Checks**: Exposes OpenAI (`/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`), Anthropic `/v1/messages`, and Gemini `/v1beta/models/*` while preserving tool strictness and signed thinking replay metadata.
+- **Four-Domain Secret Isolation & Single Authority**: Separates `ADMIN_PASSWORD`, `apiKeys`, upstream creds, and `MODELBRIDGE_STATE_TOKEN` across WAL SQLite or `AppConfigStore` DO, supporting explicit `upstream:<id>:<model>` pinning.
+- **Platform Budget Injection & SSRF Guards**: Emits 6 platform bundles (Cloudflare `16 MiB`, Makers `1 MiB`, ESA `4`-fetch limit) and validates custom upstream `baseUrl` values via public HTTPS checks.
+:::
+
+::: warning Explicit Non-Goals & Hard Boundaries
+- **Explicitly Omitted Surfaces**: Does not implement `/v1/responses` or image/audio media generation; Gemini `:countTokens` always returns `501`.
+- **Advisory Discovery & No Blind 5xx Retries**: The 65-alias map and Neurons indicator are non-enforcing helpers; timeouts and `5xx` errors never fail over across accounts to avoid duplicate billing.
+- **No Dual-Write State Fallback**: Never dual-writes between self-hosted SQLite and native DO; EdgeOne Makers enforces a strict `1 MiB` request cap.
 :::
 
 ## Architecture Overview
