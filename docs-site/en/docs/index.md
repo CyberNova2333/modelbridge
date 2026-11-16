@@ -1,4 +1,4 @@
-# 1. Getting Started & Multi-Platform Deployment
+# Getting Started & Multi-Platform Deployment
 
 ::: warning AI Translation Notice
 This page is an English translation of the [authoritative Chinese deployment documentation](/docs/). Refer to the Chinese version in case of discrepancies.
@@ -91,4 +91,4 @@ The root `_worker.js` + `wrangler.toml` setup (`name = "aigateway"`, `compatibil
 ## Next Steps
 
 - Hit a `503`, `401`, `413`, or SQLite startup failure? Check [Deployment & Operations FAQ](/en/docs/deployment-faq).
-- Integrating client SDKs? Read [2. API, Security & Routing Contracts](/en/docs/contracts).
+- Integrating client SDKs? Read [API, Security & Routing Contracts](/en/docs/contracts).

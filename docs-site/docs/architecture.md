@@ -1,4 +1,4 @@
-# 3. 架构全景与源码导览
+# 架构全景与源码导览
 
 ModelBridge 采用“**共享核心 + 注入式平台适配器 + 独立配置权威**”设计：请求解析、鉴权校验、路由与跨协议转换全部集中在根目录 [`_worker.js`](https://github.com/CyberNova2333/modelbridge/blob/main/_worker.js)，通过工厂函数 `createGateway(runtime)` 消费不同边缘运行时与状态后端能力。
 

@@ -13,6 +13,6 @@ The line-referenced walkthrough is maintained in Chinese at [`repo-docs/walkthro
 
 ## English Documentation Links
 
-- [3. Architecture & Code Tour](/en/docs/architecture)
-- [2. API, Security & Routing Contracts](/en/docs/contracts)
+- [Architecture & Code Tour](/en/docs/architecture)
+- [API, Security & Routing Contracts](/en/docs/contracts)
 - [Code Map & Module Reference](/en/code-map)

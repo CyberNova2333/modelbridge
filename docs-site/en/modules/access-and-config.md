@@ -9,6 +9,6 @@ Full source-anchored notes are maintained in Chinese at [`repo-docs/modules/acce
 
 ## English Documentation Links
 
-- [2. API, Security & Routing Contracts](/en/docs/contracts)
+- [API, Security & Routing Contracts](/en/docs/contracts)
 - [Architecture Decisions & Migrations](/en/docs/migrations)
-- [3. Architecture & Code Tour](/en/docs/architecture)
+- [Architecture & Code Tour](/en/docs/architecture)

@@ -9,6 +9,6 @@ Full source-anchored notes are maintained in Chinese at [`repo-docs/modules/rout
 
 ## English Documentation Links
 
-- [2. API, Security & Routing Contracts](/en/docs/contracts)
-- [2. Failover, Adapters & Extensions](/en/docs/adapters)
-- [3. Architecture & Code Tour](/en/docs/architecture)
+- [API, Security & Routing Contracts](/en/docs/contracts)
+- [Failover, Adapters & Extensions](/en/docs/adapters)
+- [Architecture & Code Tour](/en/docs/architecture)

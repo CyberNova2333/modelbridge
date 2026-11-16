@@ -7,13 +7,13 @@ hero:
   tagline: 用同一共享核心对外提供 OpenAI、Anthropic 与 Gemini 接口，运行于 Cloudflare Workers、EdgeOne Makers、阿里云 ESA 与自建 Node.js 24 SQLite 状态服务。
   actions:
     - theme: brand
-      text: 1. 起步与部署
+      text: 起步与部署
       link: /docs/
     - theme: alt
-      text: 2. 契约与扩展
+      text: 契约与扩展
       link: /docs/contracts
     - theme: alt
-      text: 3. 原理与源码
+      text: 原理与源码
       link: /docs/architecture
     - theme: alt
       text: GitHub 仓库
@@ -27,15 +27,6 @@ features:
   - title: 边缘预算与有界容错
     details: 针对 Cloudflare（16 MiB）、EdgeOne Makers（1 MiB）与阿里云 ESA（4 次出站 fetch / 9s 首包 / 115s 总时长）注入运行约束；仅在 401/403/404/429 明确拒绝时最多尝试 3 个候选账号。
 ---
-
-## 按身份/目标快速入口
-
-| 你的角色 / 目标 | 关注重点 | 推荐入口 |
-| :--- | :--- | :--- |
-| **个人部署 / 运维工程师** | 选型（自建 SQLite vs 原生 DO）、Secret 矩阵、Makers / ESA / Caddy 部署 | [1. 起步与多平台部署](/docs/) · [部署运维与排错 FAQ](/docs/deployment-faq) |
-| **客户端 / SDK 接入方** | OpenAI / Anthropic / Gemini 请求格式、模型前缀与别名路由、响应边界 | [2. 接口、安全与路由契约](/docs/contracts) |
-| **二次开发 / 扩展贡献者** | 容错边界、Antigravity OAuth、`createGateway` 平台与上游适配器扩展 | [2. 上游容错与扩展指南](/docs/adapters) · [边缘平台与自建状态](/modules/platform-adapters) |
-| **架构审计 / 源码研读** | 一次完整请求的源码走读、代码地图、DO 迁出与关键架构决策（ADR） | [3. 架构全景与源码导览](/docs/architecture) · [关键架构决策与迁移](/docs/migrations) · [源码走读](/walkthroughs/one-real-run) |
 
 ## 架构全景
 
@@ -66,3 +57,12 @@ node tools/build-platforms.mjs
 # 3. 本地启动自建 SQLite 状态服务（默认 127.0.0.1:8788）
 MODELBRIDGE_STATE_TOKEN="$(openssl rand -hex 32)" pnpm run start:state
 ```
+
+## 文档分层导航
+
+::: tip 按照读者需求快速跳转
+- **个人部署 / 运维工程师**：阅读 [起步与多平台部署](/docs/) 与 [部署运维与排错 FAQ](/docs/deployment-faq)，掌握自建 SQLite vs 原生 DO 选型、Secret 矩阵与多云部署；
+- **客户端 / SDK 接入方**：查阅 [接口、安全与路由契约](/docs/contracts)，核对 OpenAI / Anthropic / Gemini 请求格式、模型前缀与别名路由；
+- **二次开发 / 扩展贡献者**：查阅 [上游容错与扩展指南](/docs/adapters) 与 [边缘平台与自建状态](/modules/platform-adapters)，了解 Antigravity OAuth 与 `createGateway` 适配层；
+- **架构审计 / 源码研读**：查阅 [架构全景与模块交互](/docs/architecture)、[关键架构决策与迁移](/docs/migrations)、[源码走读](/walkthroughs/one-real-run) 与 [代码地图](/code-map)。
+:::

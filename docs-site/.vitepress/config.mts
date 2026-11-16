@@ -40,28 +40,28 @@ export default defineConfig({
         siteTitle: "模桥 ModelBridge",
         nav: [
           { text: '首页', link: '/' },
-          { text: '1. 起步与部署', link: '/docs/' },
-          { text: '2. 契约与扩展', link: '/docs/contracts' },
-          { text: '3. 原理与源码', link: '/docs/architecture' },
+          { text: '起步与部署', link: '/docs/' },
+          { text: '契约与扩展', link: '/docs/contracts' },
+          { text: '原理与源码', link: '/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
-            text: '1. 起步与配置部署',
+            text: '起步与配置部署',
             items: [
               { text: '项目全貌与多平台部署', link: '/docs/' },
               { text: '部署运维与排错 FAQ', link: '/docs/deployment-faq' },
             ]
           },
           {
-            text: '2. 接口与扩展契约',
+            text: '接口与扩展契约',
             items: [
               { text: '接口、安全与路由契约', link: '/docs/contracts' },
               { text: '上游容错与扩展指南', link: '/docs/adapters' },
             ]
           },
           {
-            text: '3. 原理与源码导览',
+            text: '原理与源码导览',
             items: [
               { text: '架构全景与模块交互', link: '/docs/architecture' },
               { text: '关键架构决策与迁移', link: '/docs/migrations' },
@@ -91,28 +91,28 @@ export default defineConfig({
         siteTitle: "ModelBridge",
         nav: [
           { text: 'Home', link: '/en/' },
-          { text: '1. Deployment', link: '/en/docs/' },
-          { text: '2. Contracts', link: '/en/docs/contracts' },
-          { text: '3. Architecture', link: '/en/docs/architecture' },
+          { text: 'Deployment', link: '/en/docs/' },
+          { text: 'Contracts', link: '/en/docs/contracts' },
+          { text: 'Architecture', link: '/en/docs/architecture' },
           { text: 'GitHub', link: 'https://github.com/CyberNova2333/modelbridge' },
         ],
         sidebar: [
           {
-            text: '1. Getting Started & Deployment',
+            text: 'Getting Started & Deployment',
             items: [
               { text: 'Overview & Multi-Platform Matrix', link: '/en/docs/' },
               { text: 'Deployment & Operations FAQ', link: '/en/docs/deployment-faq' },
             ]
           },
           {
-            text: '2. Contracts & Extension',
+            text: 'Contracts & Extension',
             items: [
               { text: 'API, Security & Routing Contracts', link: '/en/docs/contracts' },
               { text: 'Failover, Adapters & Extensions', link: '/en/docs/adapters' },
             ]
           },
           {
-            text: '3. Architecture & Code Tour',
+            text: 'Architecture & Code Tour',
             items: [
               { text: 'Architecture & Module Overview', link: '/en/docs/architecture' },
               { text: 'Architecture Decisions & Migrations', link: '/en/docs/migrations' },

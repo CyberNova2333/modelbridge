@@ -69,9 +69,9 @@ node tools/build-platforms.mjs
 
 | 读者目标 | 文档站章节（`docs-site/`） | 源码指南（`repo-docs/`） |
 | :--- | :--- | :--- |
-| 部署、Secret 与环境变量配置 | [1. 起步与配置部署](docs-site/docs/index.md) · [部署排错 FAQ](docs-site/docs/deployment-faq.md) | [多平台与自建状态](repo-docs/modules/platform-adapters.md) |
-| 客户端接入、模型映射与扩展开发 | [2. 接口与路由契约](docs-site/docs/contracts.md) · [上游容错与扩展](docs-site/docs/adapters.md) | [模型路由与协议](repo-docs/modules/routing-and-protocols.md) · [上游与配额](repo-docs/modules/upstream-and-quota.md) |
-| 一次请求链路、代码定位与安全边界 | [3. 架构全景与源码导览](docs-site/docs/architecture.md) | [主流程走读](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) · [访问与配置](repo-docs/modules/access-and-config.md) |
+| 部署、Secret 与环境变量配置 | [起步与配置部署](docs-site/docs/index.md) · [部署排错 FAQ](docs-site/docs/deployment-faq.md) | [多平台与自建状态](repo-docs/modules/platform-adapters.md) |
+| 客户端接入、模型映射与扩展开发 | [接口与路由契约](docs-site/docs/contracts.md) · [上游容错与扩展](docs-site/docs/adapters.md) | [模型路由与协议](repo-docs/modules/routing-and-protocols.md) · [上游与配额](repo-docs/modules/upstream-and-quota.md) |
+| 一次请求链路、代码定位与安全边界 | [架构全景与源码导览](docs-site/docs/architecture.md) | [主流程走读](repo-docs/walkthroughs/one-real-run.md) · [代码地图](repo-docs/code-map.md) · [访问与配置](repo-docs/modules/access-and-config.md) |
 | DO 迁出、容灾备份与架构决策 | [关键架构决策与迁移](docs-site/docs/migrations.md) | [术语表](repo-docs/glossary.md) · [源码证据](repo-docs/references/source-evidence.md) · [变更记录](repo-docs/change-log.md) |
 | 贡献代码、提交护栏与安全报告 | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [AGENTS.md](AGENTS.md) |
 

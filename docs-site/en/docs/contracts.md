@@ -1,4 +1,4 @@
-# 2. API, Security & Routing Contracts
+# API, Security & Routing Contracts
 
 ::: warning AI Translation Notice
 This page is an English translation of the [authoritative Chinese contracts guide](/docs/contracts). Refer to the Chinese version in case of discrepancies.
@@ -53,4 +53,4 @@ For `openai` (`https://api.openai.com/v1`), `anthropic` (`https://api.anthropic.
 
 ## Next Steps
 
-- Learn bounded failover and how to add adapters in [2. Failover, Adapters & Extensions](/en/docs/adapters).
+- Learn bounded failover and how to add adapters in [Failover, Adapters & Extensions](/en/docs/adapters).

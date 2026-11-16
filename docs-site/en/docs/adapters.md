@@ -1,4 +1,4 @@
-# 2. Failover, Adapters & Extensions
+# Failover, Adapters & Extensions
 
 ::: warning AI Translation Notice
 This page is an English translation of the [authoritative Chinese adapters guide](/docs/adapters). Refer to the Chinese version in case of discrepancies.
@@ -31,4 +31,4 @@ Root `_worker.js` exports `createGateway(runtime)` so platform entries (`src/pla
 
 ## Next Steps
 
-- Explore the interactive system diagram and source walkthroughs in [3. Architecture & Code Tour](/en/docs/architecture).
+- Explore the interactive system diagram and source walkthroughs in [Architecture & Code Tour](/en/docs/architecture).

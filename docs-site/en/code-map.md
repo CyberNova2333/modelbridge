@@ -18,6 +18,6 @@ The full line-anchored code map is maintained in Chinese at [`repo-docs/code-map
 
 ## Related English Pages
 
-- [3. Architecture & Code Tour](/en/docs/architecture)
+- [Architecture & Code Tour](/en/docs/architecture)
 - [One Real Run Walkthrough](/en/walkthroughs/one-real-run)
 - [Module: Access & Config](/en/modules/access-and-config) · [Routing & Protocols](/en/modules/routing-and-protocols) · [Upstream & Quota](/en/modules/upstream-and-quota) · [Platform Adapters](/en/modules/platform-adapters)

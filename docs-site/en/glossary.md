@@ -14,5 +14,5 @@ The complete three-column glossary is maintained in Chinese at [`repo-docs/gloss
 
 ## English Documentation Links
 
-- [3. Architecture & Code Tour](/en/docs/architecture)
-- [2. API, Security & Routing Contracts](/en/docs/contracts)
+- [Architecture & Code Tour](/en/docs/architecture)
+- [API, Security & Routing Contracts](/en/docs/contracts)

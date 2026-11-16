@@ -1,4 +1,4 @@
-# 1. 起步与多平台部署
+# 起步与多平台部署
 
 **模桥（ModelBridge）** 用同一套核心网关逻辑（`_worker.js`）对外暴露 **OpenAI、Anthropic 与 Gemini** 客户端接口，内置 Primer 风格门户页 `/` 与管理控制台 `/admin`，并通过 `src/platforms/` 适配 **Cloudflare Workers、EdgeOne Makers、阿里云 ESA**，配合 `src/self-hosted/` 提供的 **Node.js 24 + SQLite** 自建状态服务运行。
 
@@ -106,4 +106,4 @@ pnpm run start:state
 ## 下一步阅读
 
 - 遇到部署启动失败或平台报错？查看 [部署运维与排错 FAQ](/docs/deployment-faq)。
-- 准备接入 OpenAI / Anthropic / Gemini 客户端？阅读 [2. 接口、安全与路由契约](/docs/contracts)。
+- 准备接入 OpenAI / Anthropic / Gemini 客户端？阅读 [接口、安全与路由契约](/docs/contracts)。

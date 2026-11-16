@@ -1,4 +1,4 @@
-# 2. 上游容错、适配器与扩展指南
+# 上游容错、适配器与扩展指南
 
 本页说明 ModelBridge 如何在多账号候选间执行有界切换、如何在跨平台适配器间复用统一核心，以及扩展新平台或上游供应商时的架构边界。模块级代码细节请参阅 [模块：上游、OAuth 与配额](/modules/upstream-and-quota) 与 [模块：边缘平台与自建状态](/modules/platform-adapters)。
 
@@ -68,5 +68,5 @@ Ollama（`/v1` 兼容模式）、vLLM、SGLang 等自托管推理服务均实现
 
 ## 下一步
 
-- 查看整个系统的交互拓扑、代码目录分工与完整请求走读：阅读 [3. 架构全景与源码导览](/docs/architecture)。
+- 查看整个系统的交互拓扑、代码目录分工与完整请求走读：阅读 [架构全景与源码导览](/docs/architecture)。
 - 需要做 Cloudflare DO 到 SQLite 的迁移或了解核心架构取舍：阅读 [关键架构决策与迁移](/docs/migrations)。

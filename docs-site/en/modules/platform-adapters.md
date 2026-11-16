@@ -9,6 +9,6 @@ Full source-anchored notes are maintained in Chinese at [`repo-docs/modules/plat
 
 ## English Documentation Links
 
-- [1. Getting Started & Multi-Platform Deployment](/en/docs/)
+- [Getting Started & Multi-Platform Deployment](/en/docs/)
 - [Deployment & Operations FAQ](/en/docs/deployment-faq)
-- [3. Architecture & Code Tour](/en/docs/architecture)
+- [Architecture & Code Tour](/en/docs/architecture)

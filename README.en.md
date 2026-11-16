@@ -69,9 +69,9 @@ node tools/build-platforms.mjs
 
 | Goal | Docs Site (`docs-site/`) | Source Guide (`repo-docs/`, Chinese) |
 | :--- | :--- | :--- |
-| Deployments, Secrets & Env Matrix | [1. Getting Started & Deployment](docs-site/en/docs/index.md) · [Deployment FAQ](docs-site/en/docs/deployment-faq.md) | [Platform Adapters & State](repo-docs/modules/platform-adapters.md) |
-| Client APIs, Routing & Custom Providers | [2. API & Routing Contracts](docs-site/en/docs/contracts.md) · [Adapters & Extensions](docs-site/en/docs/adapters.md) | [Routing & Protocols](repo-docs/modules/routing-and-protocols.md) · [Upstreams & Quota](repo-docs/modules/upstream-and-quota.md) |
-| Request Lifecycle & Code Navigation | [3. Architecture & Code Tour](docs-site/en/docs/architecture.md) | [One Real Run](repo-docs/walkthroughs/one-real-run.md) · [Code Map](repo-docs/code-map.md) · [Access & Config](repo-docs/modules/access-and-config.md) |
+| Deployments, Secrets & Env Matrix | [Getting Started & Deployment](docs-site/en/docs/index.md) · [Deployment FAQ](docs-site/en/docs/deployment-faq.md) | [Platform Adapters & State](repo-docs/modules/platform-adapters.md) |
+| Client APIs, Routing & Custom Providers | [API & Routing Contracts](docs-site/en/docs/contracts.md) · [Adapters & Extensions](docs-site/en/docs/adapters.md) | [Routing & Protocols](repo-docs/modules/routing-and-protocols.md) · [Upstreams & Quota](repo-docs/modules/upstream-and-quota.md) |
+| Request Lifecycle & Code Navigation | [Architecture & Code Tour](docs-site/en/docs/architecture.md) | [One Real Run](repo-docs/walkthroughs/one-real-run.md) · [Code Map](repo-docs/code-map.md) · [Access & Config](repo-docs/modules/access-and-config.md) |
 | DO Migration, Backups & ADRs | [Decisions & Migrations (ADR)](docs-site/en/docs/migrations.md) | [Glossary](repo-docs/glossary.md) · [Source Evidence](repo-docs/references/source-evidence.md) · [Change Log](repo-docs/change-log.md) |
 | Contributing, Hooks & Security Policy | — | [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [AGENTS.md](AGENTS.md) |
 

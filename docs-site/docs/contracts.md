@@ -1,4 +1,4 @@
-# 2. 接口、安全与路由契约
+# 接口、安全与路由契约
 
 本页说明客户端与管理员接入 ModelBridge 时的请求入口、四态凭据边界、载荷限额、模型解析顺序及跨协议语义保证。源码级实现细节可对照 [模块：路由与协议转换](/modules/routing-and-protocols) 与 [模块：访问与配置存储](/modules/access-and-config)。
 
@@ -77,4 +77,4 @@ ModelBridge 将所有秘密信息拆分为四个互不通用、不可越权替�
 
 ## 下一步
 
-- 需要排查账号切换行为、Antigravity OAuth 或扩展新平台/上游供应商？继续阅读 [2. 上游容错、适配器与扩展指南](/docs/adapters)。
+- 需要排查账号切换行为、Antigravity OAuth 或扩展新平台/上游供应商？继续阅读 [上游容错、适配器与扩展指南](/docs/adapters)。

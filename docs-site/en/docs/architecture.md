@@ -1,4 +1,4 @@
-# 3. Architecture & Code Tour
+# Architecture & Code Tour
 
 ::: warning AI Translation Notice
 This page is an English translation of the [authoritative Chinese architecture guide](/docs/architecture). Refer to the Chinese version in case of discrepancies.

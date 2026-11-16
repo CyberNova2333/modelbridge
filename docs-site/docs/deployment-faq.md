@@ -65,4 +65,4 @@ node tools/state-admin.mjs backup --db ./data/modelbridge.sqlite --out ./backups
 
 ## 下一步
 
-- 核对协议端点的请求体限制、模型映射优先级与错误码格式，请参阅 [2. 接口、安全与路由契约](/docs/contracts)。
+- 核对协议端点的请求体限制、模型映射优先级与错误码格式，请参阅 [接口、安全与路由契约](/docs/contracts)。

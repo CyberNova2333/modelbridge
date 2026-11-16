@@ -7,13 +7,13 @@ hero:
   tagline: One shared gateway core exposing OpenAI, Anthropic, and Gemini APIs across Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and a self-hosted Node.js 24 + SQLite state service.
   actions:
     - theme: brand
-      text: 1. Deployment
+      text: Deployment
       link: /en/docs/
     - theme: alt
-      text: 2. Contracts
+      text: Contracts
       link: /en/docs/contracts
     - theme: alt
-      text: 3. Architecture
+      text: Architecture
       link: /en/docs/architecture
     - theme: alt
       text: GitHub Repo
@@ -31,15 +31,6 @@ features:
 ::: warning AI Translation Notice
 This site and documentation have been translated by an AI language model. In case of any discrepancies or ambiguities, please refer to the [Chinese documentation](/docs/) as the authoritative source.
 :::
-
-## Quick Entry by Role & Goal
-
-| Role / Goal | What You Will Find | Entry Point |
-| :--- | :--- | :--- |
-| **Operator / Self-Hoster** | Self-hosted SQLite vs native DO selection, secret matrix, Makers / ESA / Caddy setup | [1. Getting Started & Deployment](/en/docs/) · [Deployment FAQ](/en/docs/deployment-faq) |
-| **Client / SDK Integrator** | OpenAI / Anthropic / Gemini endpoints, auth headers, `upstream:` & alias resolution | [2. API, Security & Routing Contracts](/en/docs/contracts) |
-| **Contributor / Extender** | Retry limits, Antigravity OAuth, `createGateway` platform & provider adapters | [2. Failover, Adapters & Extensions](/en/docs/adapters) |
-| **Architect / Auditor** | Interactive topology diagram, DO-to-SQLite migration runbook, ADRs & source index | [3. Architecture & Code Tour](/en/docs/architecture) · [Decisions & Migrations](/en/docs/migrations) |
 
 ## Architecture Overview
 
@@ -70,3 +61,12 @@ node tools/build-platforms.mjs
 # 3. Start the self-hosted SQLite state service locally (127.0.0.1:8788)
 MODELBRIDGE_STATE_TOKEN="$(openssl rand -hex 32)" pnpm run start:state
 ```
+
+## Documentation Guide
+
+::: tip Quick Navigation by Role & Goal
+- **Operator / Self-Hoster**: Start with [Getting Started & Deployment](/en/docs/) and [Deployment FAQ](/en/docs/deployment-faq) for SQLite vs native DO selection, secret matrix, and Makers / ESA / Caddy setup;
+- **Client / SDK Integrator**: Read [API, Security & Routing Contracts](/en/docs/contracts) for OpenAI / Anthropic / Gemini endpoints, auth headers, and `upstream:` / alias resolution;
+- **Contributor / Extender**: See [Failover, Adapters & Extensions](/en/docs/adapters) for retry limits, Antigravity OAuth, and `createGateway` platform / provider adapters;
+- **Architect / Auditor**: Explore [Architecture & Code Tour](/en/docs/architecture) and [Decisions & Migrations](/en/docs/migrations).
+:::
