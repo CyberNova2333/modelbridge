@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://cybernova2333.github.io/modelbridge/">在线文档站</a>
+  <strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://modelbridge.cbnv.me/">在线文档站</a>
 </p>
 
 <p align="center">

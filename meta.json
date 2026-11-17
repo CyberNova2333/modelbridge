@@ -13,8 +13,8 @@
   "featured": true,
   "order": 5,
   "repository": "https://github.com/CyberNova2333/modelbridge",
-  "homepage": "https://cybernova2333.github.io/modelbridge/",
-  "docsUrl": "https://cybernova2333.github.io/modelbridge/docs/",
+  "homepage": "https://modelbridge.cbnv.me",
+  "docsUrl": "https://modelbridge.cbnv.me/docs/",
   "license": "AGPL-3.0-only",
   "primaryLanguage": "JavaScript",
   "techStack": [
@@ -61,5 +61,5 @@
       "en": "Protocol conversion, platform build scripts, and SQLite state service are complete."
     }
   },
-  "updatedAt": "2026-11-11"
+  "updatedAt": "2026-11-17"
 }
