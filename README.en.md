@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="README.md">简体中文</a> · <strong>English</strong> · <a href="https://modelbridge.cbnv.me/en/">Docs Site</a>
+  <a href="README.md">简体中文</a> | <strong>English</strong>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> · <a href="docs-site/en/docs/index.md">Deployment</a> · <a href="repo-docs/README.md">Source Guide (ZH)</a> · <a href="CONTRIBUTING.md">Contributing</a>
+  <a href="https://modelbridge.cbnv.me/en/">Docs Site</a> · <a href="#quick-start">Quick Start</a> · <a href="docs-site/en/docs/index.md">Deployment</a> · <a href="repo-docs/README.md">Source Guide (ZH)</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 **ModelBridge** is a multi-protocol LLM API proxy and router derived from [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API). One shared core exposes **OpenAI, Anthropic, and Gemini** client endpoints across Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and a self-hosted Node.js 24 + SQLite state service. It does not implement `/v1/responses`, full image/audio media-generation APIs, or exact cross-provider token counting (`:countTokens` returns `501`).

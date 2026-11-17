@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <strong>简体中文</strong> · <a href="README.en.md">English</a> · <a href="https://modelbridge.cbnv.me/">在线文档站</a>
+  <strong>简体中文</strong> | <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
-  <a href="#quick-start">Quick Start</a> · <a href="docs-site/docs/index.md">部署文档</a> · <a href="repo-docs/README.md">源码指南</a> · <a href="CONTRIBUTING.md">贡献指南</a>
+  <a href="https://modelbridge.cbnv.me/">在线文档站</a> · <a href="#quick-start">Quick Start</a> · <a href="docs-site/docs/index.md">部署文档</a> · <a href="repo-docs/README.md">源码指南</a> · <a href="CONTRIBUTING.md">贡献指南</a>
 </p>
 
 **模桥（ModelBridge）** 是基于 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 演进的多协议 LLM API 转发与路由网关，用同一共享核心对外提供 **OpenAI、Anthropic 与 Gemini** 客户端接口，支持 Cloudflare Workers、EdgeOne Makers、阿里云 ESA，以及自建 Node.js 24 + SQLite 状态服务。本项目不实现 `/v1/responses`、完整图像/音频生成接口或跨供应商精确 token 计数（`:countTokens` 返回 `501`）。
