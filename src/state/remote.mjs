@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// This file is part of ModelBridge · 模桥 and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
+// This file is part of ModelBridge · 模桥 and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and LICENSE-ADDITIONAL_TERMS-zh-CN.md; ref: LICENSE-ADDITIONAL_TERMS-en.md).
 // This is a trusted server-to-server channel. The service token grants the same
 // access as the CONFIG_STORE binding; it is never a browser/API-client token.
 export const STATE_SERVICE_PATH = '/_modelbridge/state';
