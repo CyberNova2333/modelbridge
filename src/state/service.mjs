@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// This file is part of ModelBridge · 模桥 and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 import {
   STATE_SERVICE_PATH, STATE_REQUEST_LIMIT, StatePayloadError,
   boundedStateResponse, exactStateOrigin, readStateJson, stateError,

@@ -86,3 +86,5 @@ node tools/build-platforms.mjs
 ## 致谢与许可
 
 感谢上游 [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) 项目与 [Cloudflare](https://www.cloudflare.com/) 开源生态。本项目基于 [GNU AGPLv3](LICENSE)（`AGPL-3.0-only`）开源，原 WorkersAI2API 的 MIT 版权与许可文本完整保留在 [`LICENSES/WorkersAI2API-MIT.txt`](LICENSES/WorkersAI2API-MIT.txt)，来源与再分发说明见 [`NOTICE`](NOTICE)。
+
+- **附加条款与资产规则**：本项目依据 GNU AGPLv3 第 7 条适用 [`ADDITIONAL_TERMS.zh-CN.md`](ADDITIONAL_TERMS.zh-CN.md)（英文参考译文：[`ADDITIONAL_TERMS.en.md`](ADDITIONAL_TERMS.en.md)，以简体中文完整版正文为准），对来源陈述、修改标识、禁止冒充、扩展模块有条件附加许可及项目标识边界作出补充说明；独立美术、字体与图标许可清单见 [`ASSET_LICENSES.md`](ASSET_LICENSES.md)。第 9.5–9.6 款的附加许可豁免仅对已取得相应版权持有人有效授权的适用材料生效，未取得该等授权的第三方或上游材料仍受其原有有效许可约束。

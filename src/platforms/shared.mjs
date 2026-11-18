@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// This file is part of ModelBridge · 模桥 and is licensed under GNU AGPLv3 with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; ref: ADDITIONAL_TERMS.en.md).
 // These are application budgets below the published ESA 10s/120s limits.
 // They do not certify the provider's cancellation or streaming implementation.
 export const PLATFORM_LIMITS = Object.freeze({

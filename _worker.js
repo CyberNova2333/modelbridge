@@ -1,3 +1,4 @@
+// Portions added/modified by CyberNova are part of ModelBridge · 模桥 and licensed under AGPL-3.0-only with Additional Terms (see LICENSE and ADDITIONAL_TERMS.zh-CN.md; upstream notices preserved).
 /**
  * 模桥 ModelBridge
  * 多供应商、多协议模型网关，带账号、调用密钥和模型映射管理。
