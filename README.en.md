@@ -17,20 +17,20 @@
   <a href="https://modelbridge.cbnv.me/en/">Docs Site</a> · <a href="#quick-start">Quick Start</a> · <a href="docs-site/en/docs/index.md">Deployment</a> · <a href="repo-docs/README.md">Source Guide (ZH)</a> · <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
-**ModelBridge** is a multi-protocol LLM API proxy and router derived from [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API). One shared core exposes **OpenAI, Anthropic, and Gemini** client endpoints across Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and a self-hosted Node.js 24 + SQLite state service. It does not implement `/v1/responses`, full image/audio media-generation APIs, or exact cross-provider token counting (`:countTokens` returns `501`).
+**ModelBridge** is a multi-protocol AI API proxy and router derived from [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API). One shared core exposes **OpenAI, Anthropic, and Gemini** client endpoints plus specialized Cloudflare Workers AI task routes (Responses, Image gen/edit, TTS/ASR/Realtime WebSocket, Rerank, Translation, Classification, Vision, and System One) across Cloudflare Workers, EdgeOne Makers, Alibaba Cloud ESA, and a self-hosted Node.js 24 + SQLite state service. It rejects unsupported model parameters pre-flight and returns `501` for cross-provider Gemini `:countTokens` without faking compatibility.
 
 ## Capabilities & Architecture Flow
 
-- **Cross-Protocol Translation with Semantic Checks**: Serves `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/messages`, and `/v1beta/models/*`, preserving tool calls, `strict`, and signed thinking replay metadata while rejecting unrepresentable constraints pre-flight.
+- **Cross-Protocol & Specialized Endpoint Coverage**: Serves `/v1/chat/completions`, `/v1/completions`, `/v1/responses` (CF `gpt-oss-120b`/`20b` & OpenAI), `/v1/embeddings` (including multimodal `embeddinggemma-2`), `/v1/images/{generations,edits}`, `/v1/audio/{speech,transcriptions,translations,realtime,turn-detection}`, `/v1/rerank`, `/v1/translations`, `/v1/classifications`, `/v1/extractions`, `/v1/decisions`, `/v1/vision`, `/v1/ai/run`, `/v1/messages`, and `/v1beta/models/*`. Adapts `moondream3.1-9B-A2B`, `clairic`, and `clef*` on chat endpoints while rejecting mismatched non-chat models pre-flight (`400`).
 - **Single State Authority & 4-Credential Isolation**: Separates `ADMIN_PASSWORD` (24h sessions), client `apiKeys`, upstream credentials, and `MODELBRIDGE_STATE_TOKEN` across self-hosted SQLite transactions or compatibility `AppConfigStore` DO.
-- **Deterministic Routing & Bounded Failover**: Resolves `@cf/`, provider prefixes, `upstream:<accountId>:<model>`, and the 65-entry `cloudflare-model-map.json`; fails over across at most 3 candidate accounts only on explicit `401/403/404/429` rejections.
-- **Edge Runtime Adapters & Admin Console**: Ships a Primer-styled portal `/` and admin UI `/admin` with per-platform budgets (Cloudflare `16 MiB`, Makers `1 MiB`, ESA `4` subrequests / `9s` first byte / `115s` total).
+- **Deterministic Routing & Bounded Failover**: Resolves `@cf/`, provider prefixes, `upstream:<accountId>:<model>`, and the 48-entry `cloudflare-model-map.json`; fails over across at most 3 candidate accounts only on explicit `401/403/404/429` rejections.
+- **Edge Runtime Adapters & Admin Console**: Ships a Primer-styled portal `/` and admin UI `/admin` with streamed JSON/binary/multipart byte budgets (Cloudflare `16 MiB`, Makers `1 MiB`, ESA `4` subrequests / `9s` first byte / `115s` total).
 
 ## Capabilities & Explicit Non-Goals
 
 | Area | What ModelBridge Delivers | Explicit Non-Goals & Hard Bounds |
 | --- | --- | --- |
-| Multi-Protocol Core | OpenAI (chat/completions/embeddings/models), Anthropic `/v1/messages`, Gemini `/v1beta/models/*` with replay & `strict` checks | **Omits** `/v1/responses`, image/audio media gen, and cross-provider token counting (`:countTokens` returns `501`) |
+| Multi-Protocol & Task Endpoints | OpenAI (chat/completions/responses/embeddings/images/audio/models), Anthropic `/v1/messages`, Gemini `/v1beta/models/*` (incl. `moondream`), plus rerank/translation/classification/System One/`/v1/ai/run` | **Pre-flight 400** on unsupported params (CF `/v1/responses` streaming, CF `response_format=url`/`n>1`/`mask`, Aura `speed!=1`); Gemini `:countTokens` returns `501` |
 | State & Credentials | 4-domain secret isolation; transactional Node 24 WAL SQLite or `AppConfigStore` DO; `upstream:<id>:<model>` routing | **No** SQLite/DO dual-write or silent fallback; `modelMap` is not an access-control allowlist |
 | Budgets & Failover | Emits 6 bundles (`1 MiB` Makers, `4`-fetch ESA); bounded 3-account failover strictly on `401/403/404/429` | **Never** retries timeouts or `5xx` errors (prevents double billing); 10k Neurons counter is advisory only |
 
@@ -69,7 +69,7 @@ node tools/build-platforms.mjs
 - **Q: Should I choose `Node.js 24 + SQLite` or native Cloudflare `DO / KV`?**
   New deployments should use `self-hosted-state` (single-host SQLite + WAL transactions) so Cloudflare, Makers, and ESA share one authority; native DO remains for existing Cloudflare setups, and KV is only migrated once on DO initialization.
 - **Q: Do `cloudflare-model-map.json` or the 10,000 Neurons counter enforce hard spending caps?**
-  No. The 65 preset aliases and cached 5-minute dashboard counter are discovery and display helpers only, not server-side spending limiters.
+  No. The 48 preset aliases and cached 5-minute dashboard counter are discovery and display helpers only, not server-side spending limiters.
 - **Q: Will ModelBridge retry another account on timeouts or `5xx` errors?**
   No. To prevent duplicate billing after an upstream may have started generation, failover occurs only on explicit `401`, `403`, `404`, or `429` responses (up to 3 candidates).
 
@@ -87,4 +87,4 @@ node tools/build-platforms.mjs
 
 Built on [WorkersAI2API](https://github.com/cmliussss2024/WorkersAI2API) and the [Cloudflare](https://www.cloudflare.com/) ecosystem. Licensed under [GNU AGPLv3](LICENSE) (`AGPL-3.0-only`); the original WorkersAI2API MIT copyright and license text are preserved verbatim in [`LICENSES/WorkersAI2API-MIT.txt`](LICENSES/WorkersAI2API-MIT.txt), with provenance notices in [`NOTICE`](NOTICE).
 
-- **Additional Terms & Assets**: Pursuant to Section 7 of GNU AGPLv3, Covered Material is governed by [`LICENSE-ADDITIONAL_TERMS-zh-CN.md`](LICENSE-ADDITIONAL_TERMS-zh-CN.md) (English reference translation: [`LICENSE-ADDITIONAL_TERMS-en.md`](LICENSE-ADDITIONAL_TERMS-en.md); the Simplified Chinese Full Text prevails), setting forth provenance, modification marking, anti-impersonation, conditional permissive-extension exemptions, and project identifier boundaries; standalone artwork, font, and icon licenses are listed in [`ASSET_LICENSES.md`](ASSET_LICENSES.md). The additional permission exemptions in Sections 9.5–9.6 apply solely to Covered Material validly authorized by the relevant copyright holders; third-party or upstream materials remain governed by their existing valid licenses.
+- **Additional Terms & Assets**: Pursuant to Section 7 of GNU AGPLv3, Covered Material is governed by [`LICENSE-ADDITIONAL_TERMS-zh-CN.md`](LICENSE-ADDITIONAL_TERMS-zh-CN.md) (English reference translation: [`LICENSE-ADDITIONAL_TERMS-en.md`](LICENSE-ADDITIONAL_TERMS-en.md); the Simplified Chinese Full Text prevails), setting forth provenance, modification marking, anti-impersonation, conditional permissive-extension exemptions, and project identifier boundaries; engineering guidance is provided in [`IMPLEMENTATION-GUIDE.zh-en.md`](IMPLEMENTATION-GUIDE.zh-en.md), and the unified four-section manifest of human authors, AI assistants, upstream/third-party code, and independent artwork, fonts, and project identifiers is maintained in [`ASSETS_LICENSES.md`](ASSETS_LICENSES.md). Authorization for additional requirements and for Sections 9.5–9.6 additional permissions is verified separately per copyright holder; third-party or upstream materials remain governed by their existing valid licenses.
