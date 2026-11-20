@@ -4,6 +4,17 @@ on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
+    inputs:
+      upstream_branch:
+        description: 'Upstream branch to fetch from WorkersAI2API'
+        required: false
+        type: string
+        default: 'main'
+      dry_run:
+        description: 'Validate merge and run tests without pushing branch or opening PR'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -34,10 +45,16 @@ jobs:
       - name: Merge upstream into a temporary checkout
         id: merge
         shell: bash
+        env:
+          UPSTREAM_BRANCH: ${{ github.event_name == 'workflow_dispatch' && inputs.upstream_branch || 'main' }}
         run: |
           set -euo pipefail
+          if ! [[ "$UPSTREAM_BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]]; then
+            echo "::error::Invalid upstream branch name: $UPSTREAM_BRANCH"
+            exit 1
+          fi
           base=$(git rev-parse HEAD)
-          git fetch --no-tags https://github.com/cmliussss2024/WorkersAI2API.git main
+          git fetch --no-tags https://github.com/cmliussss2024/WorkersAI2API.git "$UPSTREAM_BRANCH"
           upstream=$(git rev-parse FETCH_HEAD)
           if git merge-base --is-ancestor "$upstream" HEAD; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -63,7 +80,7 @@ jobs:
 
   propose:
     needs: validate
-    if: needs.validate.outputs.changed == 'true'
+    if: ${{ needs.validate.outputs.changed == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
